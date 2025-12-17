@@ -41,7 +41,7 @@ export default function ConfirmationPage() {
         </div>
 
         <p className="text-sm text-gray-600 mb-6">
-          A confirmation email has been sent. You can close this page.
+          Screenshot this page or email yourself your order number by clicking the button below
         </p>
 
         <a
