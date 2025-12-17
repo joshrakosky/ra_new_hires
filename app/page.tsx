@@ -54,7 +54,7 @@ export default function LandingPage() {
             <StrykerLogo className="text-3xl" />
           </div>
           <h1 className="text-4xl font-bold text-gray-900 mb-2">
-            Stryker Enterprise Digital and Technology
+            Enterprise Digital and Technology
           </h1>
           <p className="text-gray-600">
             Enter password to start shopping
