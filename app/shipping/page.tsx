@@ -21,23 +21,33 @@ export default function ShippingPage() {
   const [error, setError] = useState('')
 
   useEffect(() => {
+    // Check if user is authenticated (has email in sessionStorage)
+    const userEmail = sessionStorage.getItem('userEmail')
+    if (!userEmail) {
+      router.push('/')
+      return
+    }
+
     // Check if product selection exists
     const product = sessionStorage.getItem('product')
-    
     if (!product) {
       router.push('/')
       return
     }
 
-    // Load existing shipping data if returning from review page
+    // Pre-populate email from authentication
     const savedShipping = sessionStorage.getItem('shipping')
     if (savedShipping) {
       try {
         const parsedShipping = JSON.parse(savedShipping)
-        setFormData(parsedShipping)
+        setFormData({ ...parsedShipping, email: userEmail })
       } catch (e) {
-        // If parsing fails, use default formData
+        // If parsing fails, use userEmail
+        setFormData(prev => ({ ...prev, email: userEmail }))
       }
+    } else {
+      // Set email from authentication
+      setFormData(prev => ({ ...prev, email: userEmail }))
     }
   }, [router])
 
@@ -102,11 +112,11 @@ export default function ShippingPage() {
                 id="email"
                 name="email"
                 value={formData.email}
-                onChange={handleChange}
-                required
-                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#ffb500] focus:border-transparent text-black bg-white"
+                readOnly
+                className="w-full px-4 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-600 cursor-not-allowed"
                 placeholder="your.email@example.com"
               />
+              <p className="mt-1 text-xs text-gray-500">Email is set from your login</p>
             </div>
 
             <div>

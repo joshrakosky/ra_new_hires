@@ -10,9 +10,13 @@ export default function AdminExportButton() {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    // Check if admin password was entered (stored in sessionStorage)
+    // Check if admin email was used (stored in sessionStorage)
     const adminAuth = sessionStorage.getItem('adminAuth')
-    setIsAdmin(adminAuth === 'true')
+    const userEmail = sessionStorage.getItem('userEmail')
+    const ADMIN_EMAIL = 'josh.rakosky@proforma.com'
+    
+    // User is admin if adminAuth is set OR if their email matches admin email
+    setIsAdmin(adminAuth === 'true' || (userEmail && userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase()))
   }, [])
 
   const exportToExcel = async () => {

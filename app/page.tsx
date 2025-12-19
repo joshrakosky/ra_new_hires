@@ -6,38 +6,66 @@ import StrykerLogo from '@/components/StrykerLogo'
 import AdminExportButton from '@/components/AdminExportButton'
 import HelpIcon from '@/components/HelpIcon'
 
+// Allowed email addresses (case-insensitive)
+const ALLOWED_EMAILS = [
+  'abhishek.choudhary01@stryker.com',
+  'ruchika.sikri@stryker.com',
+  'ravindra.singh@stryker.com',
+  'sunil.malodia@stryker.com',
+  'shaun.wernette@stryker.com',
+  'diane.riepl@stryker.com',
+  'heather.maurer@stryker.com',
+  'raghu.birru@stryker.com',
+  'roger.pluijm@stryker.com',
+  'patrice.poirier@stryker.com',
+  'cindy.lutz@stryker.com',
+  'debatra.sengupta@stryker.com',
+  'khadiza.hussain@stryker.com',
+  'shalini.ramesh@stryker.com',
+  'michelle.yarger@stryker.com',
+  'john.rossman@stryker.com',
+  'epaphra.sattenapalli@stryker.com',
+  'bobby.dack@stryker.com'
+]
+
+const ADMIN_EMAIL = 'josh.rakosky@proforma.com'
+
 export default function LandingPage() {
   const router = useRouter()
-  const [password, setPassword] = useState('')
+  const [email, setEmail] = useState('')
   const [error, setError] = useState('')
-
-  // Passwords for site access
-  const SITE_PASSWORD = 'sykedt25'
-  const ADMIN_PASSWORD = 'sykedtadmin'
 
   const handleStart = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (!password) {
-      setError('Please enter the password')
+    if (!email) {
+      setError('Please enter your email address')
       return
     }
 
-    // Check if admin password
-    if (password === ADMIN_PASSWORD) {
+    // Normalize email to lowercase for comparison
+    const normalizedEmail = email.toLowerCase().trim()
+
+    // Check if admin email
+    if (normalizedEmail === ADMIN_EMAIL.toLowerCase()) {
+      sessionStorage.setItem('userEmail', normalizedEmail)
       sessionStorage.setItem('adminAuth', 'true')
-      // Still navigate to product page, but admin export button will be enabled
       router.push('/product')
       return
     }
 
-    // Check if regular password is correct
-    if (password !== SITE_PASSWORD) {
-      setError('Incorrect password. Please try again.')
+    // Check if email is in allowed list (case-insensitive)
+    const isAllowed = ALLOWED_EMAILS.some(
+      allowedEmail => allowedEmail.toLowerCase() === normalizedEmail
+    )
+
+    if (!isAllowed) {
+      setError('This email is not authorized to access the site. Please contact support.')
       return
     }
 
-    // Clear admin auth if regular user
+    // Store user email and clear admin auth for regular users
+    sessionStorage.setItem('userEmail', normalizedEmail)
     sessionStorage.removeItem('adminAuth')
 
     // Navigate to product selection page
@@ -57,25 +85,25 @@ export default function LandingPage() {
             Enterprise Digital and Technology
           </h1>
           <p className="text-gray-600">
-            Enter password to start shopping
+            Enter your email to start shopping
           </p>
         </div>
 
         <form onSubmit={handleStart} className="space-y-6">
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-              Password
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
+              Email
             </label>
             <input
-              type="password"
-              id="password"
-              value={password}
+              type="email"
+              id="email"
+              value={email}
               onChange={(e) => {
-                setPassword(e.target.value)
+                setEmail(e.target.value)
                 setError('')
               }}
               className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#ffb500] focus:border-transparent text-black bg-white"
-              placeholder="Enter password"
+              placeholder="Enter your email"
               required
             />
             {error && (

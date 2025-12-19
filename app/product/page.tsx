@@ -93,6 +93,13 @@ export default function ProductPage() {
   }
 
   useEffect(() => {
+    // Check if user is authenticated (has email in sessionStorage)
+    const userEmail = sessionStorage.getItem('userEmail')
+    if (!userEmail) {
+      router.push('/')
+      return
+    }
+
     // Load products
     loadProducts()
   }, [router])
