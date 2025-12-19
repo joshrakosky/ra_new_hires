@@ -16,7 +16,8 @@ export default function AdminExportButton() {
     const ADMIN_EMAIL = 'josh.rakosky@proforma.com'
     
     // User is admin if adminAuth is set OR if their email matches admin email
-    setIsAdmin(adminAuth === 'true' || (userEmail && userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase()))
+    const isAdminUser = adminAuth === 'true' || (userEmail !== null && userEmail.toLowerCase() === ADMIN_EMAIL.toLowerCase())
+    setIsAdmin(Boolean(isAdminUser))
   }, [])
 
   const exportToExcel = async () => {
