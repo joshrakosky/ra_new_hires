@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Stryker Christmas Store",
-  description: "Holiday product selection for Stryker",
+  title: "Republic Airways New Hires",
+  description: "First day gear selection for Republic Airways and LIFT Academy new hires",
 };
 
 export default function RootLayout({

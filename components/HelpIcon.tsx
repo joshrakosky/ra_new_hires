@@ -10,8 +10,8 @@ export default function HelpIcon() {
       {/* Help Icon */}
       <button
         onClick={() => setShowHelp(true)}
-        className="absolute top-4 left-4 w-10 h-10 rounded-full flex items-center justify-center text-black font-bold text-lg transition-opacity shadow-md z-40 hover:opacity-90"
-        style={{ backgroundColor: '#ffb500' }}
+        className="absolute top-4 left-4 w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-lg transition-opacity shadow-md z-40 hover:opacity-90"
+        style={{ backgroundColor: '#c8102e' }}
         aria-label="Help"
       >
         ?
@@ -47,7 +47,7 @@ export default function HelpIcon() {
                 <p className="text-sm text-gray-600 mb-2">For site questions:</p>
                 <a 
                   href="mailto:mpp.ecomm@proforma.com"
-                  className="text-[#ffb500] hover:underline font-medium"
+                  className="text-[#c8102e] hover:underline font-medium"
                 >
                   mpp.ecomm@proforma.com
                 </a>
@@ -56,7 +56,7 @@ export default function HelpIcon() {
                 <p className="text-sm text-gray-600 mb-2">For order questions:</p>
                 <a 
                   href="mailto:metroinfo@proforma.com"
-                  className="text-[#ffb500] hover:underline font-medium"
+                  className="text-[#c8102e] hover:underline font-medium"
                 >
                   metroinfo@proforma.com
                 </a>
@@ -65,7 +65,7 @@ export default function HelpIcon() {
                 <p className="text-sm text-gray-600 mb-2">Phone:</p>
                 <a 
                   href="tel:317-885-0077"
-                  className="text-[#ffb500] hover:underline font-medium"
+                  className="text-[#c8102e] hover:underline font-medium"
                 >
                   317-885-0077
                 </a>

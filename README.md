@@ -1,13 +1,14 @@
-# Stryker Enterprise Digital and Technology (SYK EDT) Ecommerce Site
+# Republic Airways New Hires
 
-A simplified ecommerce site for Stryker Enterprise Digital and Technology product selection. Users enter a password to access the site, select a product, provide shipping information, and receive an order confirmation.
+A streamlined ecommerce site for Republic Airways and LIFT Academy new hires to select their first day gear. Users enter a 6-letter code to access the store, select their program, choose a t-shirt size, select a kit, and complete their order.
 
 ## Features
 
-- **Password-Based Access**: Simple password entry (no email approval list)
-- **Single Product Selection**: One product selection page with color/size options
-- **Email Collection**: Email collected during shipping for order tracking
-- **One Order Per Email**: Database-enforced limit of one order per email address
+- **Code-Based Access**: 6-letter code entry (one order per code)
+- **Program Selection**: Choose between Republic Airways (RA) or LIFT Academy
+- **T-Shirt Size Selection**: Size selection with inventory tracking (XS-4XL)
+- **Kit Selection**: Choose from 4 kits per program (2x2 grid display)
+- **Inventory Management**: Automatic inventory tracking and decrementing
 - **Admin Dashboard**: View and export orders to Excel
 
 ## Quick Start
@@ -21,17 +22,22 @@ npm install
 ### 2. Set Up Supabase
 
 1. Create a new Supabase project at [supabase.com](https://supabase.com)
-2. Run the SQL schema from `supabase-schema-syk-edt.sql` in your Supabase SQL Editor
+2. Run the SQL schema from `supabase-schema-ra-new-hires.sql` in your Supabase SQL Editor
 3. Add your Supabase credentials to `.env.local`:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `NEXT_PUBLIC_ADMIN_PASSWORD` (optional, defaults to 'stryker2024')
 
-### 3. Add Products
+### 3. Add Logo Files
 
-Add your products to the `syk_edt_products` table via Supabase dashboard or SQL. See `SYK_EDT_SETUP.md` for detailed product schema.
+Place logo images in `/public/images/`:
+- `RA-Logo.png` (or .jpg, .svg, .webp)
+- `LIFT-Logo.png` (or .jpg, .svg, .webp)
 
-### 4. Run Development Server
+### 4. Add Products
+
+Add t-shirt and kit products to the `ra_new_hire_products` table via Supabase dashboard or SQL. See `RA_NEW_HIRES_SETUP.md` for detailed product schema and examples.
+
+### 5. Run Development Server
 
 ```bash
 npm run dev
@@ -41,40 +47,50 @@ Visit [http://localhost:3000](http://localhost:3000)
 
 ## Site Access
 
-**Password**: `sykedt25`
+**Admin Code**: `ADMIN` (6 capital letters)
 
-Users enter this password on the landing page to access the site.
+Users enter their 6-letter code on the landing page to access the store. The ADMIN code provides access to the admin dashboard.
 
 ## Order Flow
 
-1. **Landing Page** (`/`): User enters password
-2. **Product Selection** (`/product`): User selects one product with options
-3. **Shipping** (`/shipping`): User enters email and shipping information
-4. **Review** (`/review`): User reviews order before submission
-5. **Confirmation** (`/confirmation`): Order confirmation with order number
+1. **Landing Page** (`/`): User enters 6-letter code
+2. **Program Selection** (`/program`): User selects RA or LIFT program
+3. **T-Shirt Size** (`/tshirt-size`): User selects t-shirt size
+4. **Kit Selection** (`/kit-selection`): User selects one of 4 kits
+5. **Shipping** (`/shipping`): User enters first name, last name, email
+6. **Review** (`/review`): User reviews order before submission
+7. **Confirmation** (`/confirmation`): Order confirmation with order number
 
 ## Order Number Format
 
-Orders are numbered as: `sykedt-001`, `sykedt-002`, etc.
+Orders are numbered as: `ra-new-hire-001`, `ra-new-hire-002`, etc.
 
 ## Admin Access
 
-Visit `/admin` to:
+Enter code `ADMIN` on the landing page to access `/admin`:
 - View all orders
 - Export orders to Excel (two sheets: Detailed Orders and Distribution Summary)
 
 ## Database Schema
 
-- **syk_edt_products**: Product catalog
-- **syk_edt_orders**: Order information (with email uniqueness constraint)
-- **syk_edt_order_items**: Individual items in each order
+- **ra_new_hire_products**: Product catalog with inventory tracking
+- **ra_new_hire_orders**: Order information (one order per code)
+- **ra_new_hire_order_items**: Individual items in each order
 
-See `supabase-schema-syk-edt.sql` for the complete schema.
+See `supabase-schema-ra-new-hires.sql` for the complete schema.
 
 ## Documentation
 
-- `SYK_EDT_SETUP.md` - Detailed setup guide
-- `IMPLEMENTATION_SUMMARY.md` - Implementation details and replication guide
+- `RA_NEW_HIRES_SETUP.md` - Detailed setup guide with examples
+
+## Default Shipping Address
+
+All orders ship to:
+- Republic Airways Training Center
+- Attn: HR Shared Services
+- 1 Brickyard Ln, CARMEL, IN 46032
+
+This address is pre-filled and not editable by users.
 
 ## Deployment
 

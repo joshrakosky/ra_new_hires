@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 
-// Generate unique order number in format sykedt-001, sykedt-002, etc.
+// Generate unique order number in format ra-new-hire-001, ra-new-hire-002, etc.
 async function generateOrderNumber(): Promise<string> {
   // Get the highest existing order number
   const { data: orders, error } = await supabase
-    .from('syk_edt_orders')
+    .from('ra_new_hire_orders')
     .select('order_number')
     .order('created_at', { ascending: false })
     .limit(1)
@@ -13,51 +13,94 @@ async function generateOrderNumber(): Promise<string> {
   if (error) {
     console.error('Error fetching orders:', error)
     // Fallback: start from 1 if there's an error
-    return 'sykedt-001'
+    return 'ra-new-hire-001'
   }
 
   if (!orders || orders.length === 0) {
     // First order
-    return 'sykedt-001'
+    return 'ra-new-hire-001'
   }
 
-  // Extract number from existing order (e.g., "sykedt-001" -> 1)
+  // Extract number from existing order (e.g., "ra-new-hire-001" -> 1)
   const lastOrderNumber = orders[0].order_number
-  const match = lastOrderNumber.match(/sykedt-(\d+)/i)
+  const match = lastOrderNumber.match(/ra-new-hire-(\d+)/i)
   
   if (match) {
     const lastNumber = parseInt(match[1], 10)
     const nextNumber = lastNumber + 1
-    return `sykedt-${String(nextNumber).padStart(3, '0')}`
+    return `ra-new-hire-${String(nextNumber).padStart(3, '0')}`
   }
 
   // If format doesn't match, start from 1
-  return 'sykedt-001'
+  return 'ra-new-hire-001'
+}
+
+// Update inventory for a product
+async function updateInventory(productId: string, size: string | null, quantity: number = 1): Promise<void> {
+  try {
+    // Get current product data
+    const { data: product, error: fetchError } = await supabase
+      .from('ra_new_hire_products')
+      .select('inventory, inventory_by_size')
+      .eq('id', productId)
+      .single()
+
+    if (fetchError) throw fetchError
+
+    // Update overall inventory
+    const newInventory = Math.max(0, (product.inventory || 0) - quantity)
+
+    // Update size-specific inventory if size is provided
+    let newInventoryBySize = product.inventory_by_size || {}
+    if (size && newInventoryBySize[size] !== undefined) {
+      newInventoryBySize = {
+        ...newInventoryBySize,
+        [size]: Math.max(0, (newInventoryBySize[size] || 0) - quantity)
+      }
+    }
+
+    // Update product inventory
+    const { error: updateError } = await supabase
+      .from('ra_new_hire_products')
+      .update({
+        inventory: newInventory,
+        inventory_by_size: newInventoryBySize
+      })
+      .eq('id', productId)
+
+    if (updateError) throw updateError
+  } catch (error) {
+    console.error('Error updating inventory:', error)
+    throw error
+  }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { email, shipping, product } = body
+    const { code, email, firstName, lastName, program, tshirtSize, kitId, shipping } = body
 
     // Validate required fields
-    if (!email || !shipping || !product) {
+    if (!code || !email || !firstName || !lastName || !program || !tshirtSize || !kitId || !shipping) {
       return NextResponse.json(
         { error: 'Missing required fields' },
         { status: 400 }
       )
     }
 
-    // Check for duplicate order by email (one order per email)
+    // Normalize code to uppercase
+    const normalizedCode = code.toUpperCase().trim()
+
+    // Check for duplicate order by code (one order per code)
     const { data: existingOrder } = await supabase
-      .from('syk_edt_orders')
+      .from('ra_new_hire_orders')
       .select('id')
-      .eq('email', email.toLowerCase())
+      .eq('code', normalizedCode)
       .single()
 
     if (existingOrder) {
       return NextResponse.json(
-        { error: 'An order already exists for this email address. Only one order per email is allowed.' },
+        { error: 'This code has already been used. Each code can only be used once.' },
         { status: 400 }
       )
     }
@@ -67,11 +110,17 @@ export async function POST(request: NextRequest) {
 
     // Create order
     const { data: order, error: orderError } = await supabase
-      .from('syk_edt_orders')
+      .from('ra_new_hire_orders')
       .insert({
+        code: normalizedCode,
         email: email.toLowerCase(),
+        first_name: firstName,
+        last_name: lastName,
         order_number: orderNumber,
+        program: program,
+        tshirt_size: tshirtSize,
         shipping_name: shipping.name,
+        shipping_attention: shipping.attention || null,
         shipping_address: shipping.address,
         shipping_address2: shipping.address2 || null,
         shipping_city: shipping.city,
@@ -84,62 +133,70 @@ export async function POST(request: NextRequest) {
 
     if (orderError) throw orderError
 
-    // Get product details for order item
-    const { data: productData } = await supabase
-      .from('syk_edt_products')
-      .select('name, customer_item_number')
-      .eq('id', product.productId)
+    // Get RA t-shirt product details (used for both RA and LIFT programs)
+    const { data: tshirtProduct } = await supabase
+      .from('ra_new_hire_products')
+      .select('id, name, customer_item_number')
+      .eq('category', 'tshirt')
+      .eq('program', 'RA')
       .single()
 
-    // Handle YETI Kit specially - creates 3 items (one for each size) with individual colors
-    const isYetiKit = product.isYetiKit || productData?.name === 'YETI Kit'
+    // Get kit product details and its items
+    const { data: kitProduct } = await supabase
+      .from('ra_new_hire_products')
+      .select('id, name, customer_item_number')
+      .eq('id', kitId)
+      .single()
+
+    // Fetch all products in the kit (kit products have category='kit' and may have related items)
+    // For now, we'll create order items for the t-shirt and the kit itself
+    // If kits have multiple items, they should be stored as separate products with a kit_id reference
+    // or we can fetch kit items separately - for now, treating kit as a single product
     
     let orderItems: any[] = []
-    
-    if (isYetiKit && product.yeti8ozColor && product.yeti26ozColor && product.yeti35ozColor) {
-      // Create 3 order items for YETI Kit - one for each size with its selected color
-      const yetiItems = [
-        {
-          size: '8oz',
-          name: 'YETI Rambler 8oz Stackable Cup',
-          color: product.yeti8ozColor
-        },
-        {
-          size: '26oz',
-          name: 'YETI Rambler 26oz Straw Bottle',
-          color: product.yeti26ozColor
-        },
-        {
-          size: '35oz',
-          name: 'YETI Rambler 35oz Tumbler with Straw Lid',
-          color: product.yeti35ozColor
-        }
-      ]
-      
-      orderItems = yetiItems.map(item => ({
+
+    // Add t-shirt order item with size-specific SKU
+    if (tshirtProduct) {
+      // Build size-specific SKU: base SKU + "-" + size (e.g., RA-NH-TEE-XS)
+      const tshirtSku = tshirtProduct.customer_item_number 
+        ? `${tshirtProduct.customer_item_number}-${tshirtSize}`
+        : null
+
+      orderItems.push({
         order_id: order.id,
-        product_id: product.productId,
-        product_name: item.name,
-        customer_item_number: productData?.customer_item_number || null,
-        color: item.color,
-        size: item.size
-      }))
-    } else {
-      // Regular single product
-      orderItems = [
-        {
-          order_id: order.id,
-          product_id: product.productId,
-          product_name: productData?.name || 'Unknown Product',
-          customer_item_number: productData?.customer_item_number || null,
-          color: product.color || null,
-          size: product.size || null
-        }
-      ]
+        product_id: tshirtProduct.id,
+        product_name: `${tshirtProduct.name} - ${tshirtSize}`,
+        customer_item_number: tshirtSku,
+        color: null,
+        size: tshirtSize
+      })
+
+      // Update t-shirt inventory
+      await updateInventory(tshirtProduct.id, tshirtSize, 1)
     }
 
+    // Add kit order item
+    if (kitProduct) {
+      orderItems.push({
+        order_id: order.id,
+        product_id: kitProduct.id,
+        product_name: kitProduct.name,
+        customer_item_number: kitProduct.customer_item_number || null,
+        color: null,
+        size: null
+      })
+
+      // Update kit inventory
+      await updateInventory(kitProduct.id, null, 1)
+    }
+
+    // If kit has multiple items, fetch them and add to order
+    // This assumes kit items are stored as separate products with a kit_id field
+    // For now, we'll add the kit as a single item
+    // TODO: If kits have multiple products, fetch them here
+
     const { error: itemsError } = await supabase
-      .from('syk_edt_order_items')
+      .from('ra_new_hire_order_items')
       .insert(orderItems)
 
     if (itemsError) throw itemsError

@@ -1,19 +1,28 @@
-// Stryker Logo Component
-// Displays the Stryker logo image
+// Program Logo Component
+// Displays the RA or LIFT logo based on selected program
 // Supports multiple formats: .png, .jpg, .svg, .webp
 
 'use client'
 
 import { useState } from 'react'
 
-export default function StrykerLogo({ className = '' }: { className?: string }) {
+type Program = 'RA' | 'LIFT'
+
+interface ProgramLogoProps {
+  program: Program
+  className?: string
+}
+
+export default function ProgramLogo({ program, className = '' }: ProgramLogoProps) {
   const [imageError, setImageError] = useState(false)
   
   // Try different image formats
   const imageFormats = ['png', 'jpg', 'svg', 'webp']
   const [currentFormat, setCurrentFormat] = useState(0)
   
-  const imageSrc = `/images/stryker-logo.${imageFormats[currentFormat]}`
+  // Logo filename based on program
+  const logoName = program === 'RA' ? 'RA-Logo' : 'LIFT-Logo'
+  const imageSrc = `/images/${logoName}.${imageFormats[currentFormat]}`
   
   const handleError = () => {
     if (currentFormat < imageFormats.length - 1) {
@@ -28,8 +37,8 @@ export default function StrykerLogo({ className = '' }: { className?: string }) 
   if (imageError) {
     // Fallback to text if image not found
     return (
-      <div className={`font-bold text-black ${className}`} style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif', letterSpacing: '-0.02em' }}>
-        stryker
+      <div className={`font-bold text-white ${className}`} style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif', letterSpacing: '-0.02em' }}>
+        {program === 'RA' ? 'Republic Airways' : 'LIFT Academy'}
       </div>
     )
   }
@@ -37,7 +46,7 @@ export default function StrykerLogo({ className = '' }: { className?: string }) 
   return (
     <img 
       src={imageSrc}
-      alt="Stryker" 
+      alt={program === 'RA' ? 'Republic Airways' : 'LIFT Academy'} 
       className={className}
       onError={handleError}
       style={{ maxWidth: '100%', height: 'auto' }}

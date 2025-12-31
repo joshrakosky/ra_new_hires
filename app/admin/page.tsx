@@ -9,28 +9,24 @@ import HelpIcon from '@/components/HelpIcon'
 export default function AdminPage() {
   const [orders, setOrders] = useState<OrderWithItems[]>([])
   const [loading, setLoading] = useState(true)
-  const [password, setPassword] = useState('')
   const [authenticated, setAuthenticated] = useState(false)
-  const [error, setError] = useState('')
-
-  // Simple password protection (you can enhance this later)
-  const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || 'stryker2024'
 
   useEffect(() => {
-    if (authenticated) {
-      loadOrders()
-    }
-  }, [authenticated])
-
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (password === ADMIN_PASSWORD) {
+    // Check if user is admin (ADMIN code)
+    const adminAuth = sessionStorage.getItem('adminAuth')
+    const userCode = sessionStorage.getItem('userCode')
+    const ADMIN_CODE = 'ADMIN'
+    
+    const isAdmin = adminAuth === 'true' || (userCode !== null && userCode.toUpperCase() === ADMIN_CODE)
+    
+    if (isAdmin) {
       setAuthenticated(true)
-      setError('')
+      loadOrders()
     } else {
-      setError('Incorrect password')
+      // Redirect to landing page if not admin
+      window.location.href = '/'
     }
-  }
+  }, [])
 
   const loadOrders = async () => {
     try {
@@ -38,7 +34,7 @@ export default function AdminPage() {
       
       // Fetch orders with their items
       const { data: ordersData, error: ordersError } = await supabase
-        .from('syk_edt_orders')
+        .from('ra_new_hire_orders')
         .select('*')
         .order('created_at', { ascending: false })
 
@@ -48,7 +44,7 @@ export default function AdminPage() {
       const ordersWithItems = await Promise.all(
         (ordersData || []).map(async (order) => {
           const { data: items, error: itemsError } = await supabase
-            .from('syk_edt_order_items')
+            .from('ra_new_hire_order_items')
             .select('*')
             .eq('order_id', order.id)
             .order('created_at')
@@ -64,7 +60,7 @@ export default function AdminPage() {
 
       setOrders(ordersWithItems)
     } catch (err: any) {
-      setError(err.message || 'Failed to load orders')
+      console.error('Failed to load orders:', err)
     } finally {
       setLoading(false)
     }
@@ -73,7 +69,7 @@ export default function AdminPage() {
   const exportToExcel = async () => {
     // Fetch all products to get deco information
     const { data: productsData, error: productsError } = await supabase
-      .from('syk_edt_products')
+      .from('ra_new_hire_products')
       .select('id, deco')
 
     if (productsError) {
@@ -93,13 +89,20 @@ export default function AdminPage() {
     const detailedData = orders.flatMap(order => {
       return order.items.map((item) => ({
         'Order Number': order.order_number,
+        'Code': order.code,
+        'First Name': order.first_name,
+        'Last Name': order.last_name,
         'Email': order.email,
+        'Program': order.program,
+        'T-Shirt Size': order.tshirt_size || '',
         'Product Name': item.product_name,
         'Customer Item #': item.customer_item_number || '',
         'Color': item.color || '',
         'Size': item.size || '',
         'Shipping Name': order.shipping_name,
+        'Shipping Attention': order.shipping_attention || '',
         'Shipping Address': order.shipping_address,
+        'Shipping Address 2': order.shipping_address2 || '',
         'Shipping City': order.shipping_city,
         'Shipping State': order.shipping_state,
         'Shipping ZIP': order.shipping_zip,
@@ -169,7 +172,7 @@ export default function AdminPage() {
     XLSX.utils.book_append_sheet(wb, wsSummary, 'Distribution Summary')
 
     // Generate filename with current date
-    const filename = `syk-edt-orders-${new Date().toISOString().split('T')[0]}.xlsx`
+    const filename = `ra-new-hires-orders-${new Date().toISOString().split('T')[0]}.xlsx`
 
     // Write file
     XLSX.writeFile(wb, filename)
@@ -177,50 +180,20 @@ export default function AdminPage() {
 
   if (!authenticated) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100 px-4 relative">
-        <HelpIcon />
-        <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8">
-          <h1 className="text-2xl font-bold text-gray-900 mb-6">Admin Access</h1>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
-                Password
-              </label>
-              <input
-                type="password"
-                id="password"
-                value={password}
-                onChange={(e) => {
-                  setPassword(e.target.value)
-                  setError('')
-                }}
-                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                required
-              />
-              {error && (
-                <p className="mt-2 text-sm text-red-600">{error}</p>
-              )}
-            </div>
-            <button
-              type="submit"
-              className="w-full bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
-            >
-              Login
-            </button>
-          </form>
-        </div>
+      <div className="min-h-screen flex items-center justify-center px-4 relative" style={{ backgroundColor: '#00263a' }}>
+        <div className="text-white text-xl">Checking admin access...</div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4 relative">
+    <div className="min-h-screen py-8 px-4 relative" style={{ backgroundColor: '#00263a' }}>
       <HelpIcon />
       <div className="max-w-7xl mx-auto">
         <div className="bg-white rounded-lg shadow-lg p-8">
           <div className="flex justify-between items-center mb-6">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">SYK EDT Order Management</h1>
+              <h1 className="text-3xl font-bold text-gray-900">Republic Airways New Hires - Order Management</h1>
               <p className="text-gray-600 mt-1">Total Orders: {orders.length}</p>
             </div>
             <div className="flex gap-4">
@@ -233,7 +206,8 @@ export default function AdminPage() {
               <button
                 onClick={exportToExcel}
                 disabled={orders.length === 0}
-                className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-4 py-2 text-white rounded-md hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: '#c8102e' }}
                 title="Exports two sheets: Detailed Orders and Distribution Summary"
               >
                 Export to Excel
@@ -258,13 +232,19 @@ export default function AdminPage() {
                       Order #
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Code
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Name
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Email
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Products
+                      Program
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Shipping Address
+                      Products
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Date
@@ -277,8 +257,17 @@ export default function AdminPage() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                         {order.order_number}
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">
+                        {order.code}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {order.first_name} {order.last_name}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {order.email}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {order.program}
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-500">
                         <div className="space-y-1">
@@ -290,13 +279,6 @@ export default function AdminPage() {
                               {item.size && ` (${item.size})`}
                             </div>
                           ))}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-500">
-                        <div>
-                          {order.shipping_name}<br />
-                          {order.shipping_address}<br />
-                          {order.shipping_city}, {order.shipping_state} {order.shipping_zip}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

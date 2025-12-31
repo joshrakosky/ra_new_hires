@@ -3,52 +3,90 @@
 import { useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
-import StrykerLogo from '@/components/StrykerLogo'
 import AdminExportButton from '@/components/AdminExportButton'
 import HelpIcon from '@/components/HelpIcon'
 
+type Program = 'RA' | 'LIFT'
+
 export default function ReviewPage() {
   const router = useRouter()
-  const [product, setProduct] = useState<any>(null)
-  const [productData, setProductData] = useState<any>(null)
+  const [program, setProgram] = useState<Program | null>(null)
+  const [tshirtSize, setTshirtSize] = useState<string>('')
+  const [kitId, setKitId] = useState<string>('')
+  const [tshirtProduct, setTshirtProduct] = useState<any>(null)
+  const [kitProduct, setKitProduct] = useState<any>(null)
   const [shipping, setShipping] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
-    // Check if email, product selection, and shipping exist
-    const email = sessionStorage.getItem('orderEmail')
-    const productData = sessionStorage.getItem('product')
+    // Check if user has completed all steps
+    const userCode = sessionStorage.getItem('userCode')
+    const selectedProgram = sessionStorage.getItem('selectedProgram') as Program | null
+    const tshirtSizeData = sessionStorage.getItem('tshirtSize')
+    const selectedKitId = sessionStorage.getItem('selectedKitId')
     const shippingData = sessionStorage.getItem('shipping')
     
-    if (!email || !productData || !shippingData) {
+    if (!userCode) {
       router.push('/')
       return
     }
 
+    if (!selectedProgram || (selectedProgram !== 'RA' && selectedProgram !== 'LIFT')) {
+      router.push('/program')
+      return
+    }
+
+    if (!tshirtSizeData) {
+      router.push('/tshirt-size')
+      return
+    }
+
+    if (!selectedKitId) {
+      router.push('/kit-selection')
+      return
+    }
+
+    if (!shippingData) {
+      router.push('/shipping')
+      return
+    }
+
     // Parse stored data
-    const parsedProduct = JSON.parse(productData)
     const parsedShipping = JSON.parse(shippingData)
 
-    setProduct(parsedProduct)
+    setProgram(selectedProgram)
+    setTshirtSize(tshirtSizeData)
+    setKitId(selectedKitId)
     setShipping(parsedShipping)
 
     // Load product details
-    loadProduct(parsedProduct.productId)
+    loadProducts(selectedProgram, selectedKitId)
   }, [router])
 
-  const loadProduct = async (productId: string) => {
+  const loadProducts = async (programType: Program, kitIdData: string) => {
     try {
-      const { data, error } = await supabase
-        .from('syk_edt_products')
+      // Load t-shirt product
+      const { data: tshirtData, error: tshirtError } = await supabase
+        .from('ra_new_hire_products')
         .select('*')
-        .eq('id', productId)
+        .eq('category', 'tshirt')
+        .eq('program', programType)
         .single()
 
-      if (error) throw error
+      if (tshirtError) throw tshirtError
+      setTshirtProduct(tshirtData)
 
-      setProductData(data)
+      // Load kit product
+      const { data: kitData, error: kitError } = await supabase
+        .from('ra_new_hire_products')
+        .select('*')
+        .eq('id', kitIdData)
+        .single()
+
+      if (kitError) throw kitError
+      setKitProduct(kitData)
     } catch (err: any) {
       setError(err.message || 'Failed to load product information')
     } finally {
@@ -61,6 +99,7 @@ export default function ReviewPage() {
     setSubmitting(true)
 
     try {
+      const userCode = sessionStorage.getItem('userCode')!
       const email = sessionStorage.getItem('orderEmail')!
 
       // Submit order to API
@@ -70,9 +109,14 @@ export default function ReviewPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          email,
-          shipping,
-          product
+          code: userCode,
+          email: shipping.email,
+          firstName: shipping.firstName,
+          lastName: shipping.lastName,
+          program: program,
+          tshirtSize: tshirtSize,
+          kitId: kitId,
+          shipping: shipping
         }),
       })
 
@@ -87,8 +131,11 @@ export default function ReviewPage() {
       sessionStorage.setItem('orderNumber', orderData.order_number)
       
       // Clear selections
-      sessionStorage.removeItem('product')
+      sessionStorage.removeItem('selectedProgram')
+      sessionStorage.removeItem('tshirtSize')
+      sessionStorage.removeItem('selectedKitId')
       sessionStorage.removeItem('shipping')
+      sessionStorage.removeItem('orderEmail')
       
       router.push('/confirmation')
     } catch (err: any) {
@@ -99,22 +146,21 @@ export default function ReviewPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-lg">Loading...</div>
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#00263a' }}>
+        <div className="text-white text-xl">Loading...</div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-amber-50 to-yellow-50 py-12 px-4 relative">
+    <div className="min-h-screen py-12 px-4 relative" style={{ backgroundColor: '#00263a' }}>
       <AdminExportButton />
       <HelpIcon />
       <div className="max-w-3xl mx-auto">
         <div className="bg-white rounded-lg shadow-lg p-8">
-          <div className="mb-6">
-            <StrykerLogo className="text-2xl mb-2" />
+          <div className="mb-6 text-center">
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Review Your Order</h1>
-              <p className="text-gray-600">Please review your product selection and shipping information before submitting, and feel free to screenshot this information for your convenience.</p>
+            <p className="text-gray-600">Please review your selections before submitting</p>
           </div>
 
           {error && (
@@ -123,49 +169,45 @@ export default function ReviewPage() {
             </div>
           )}
 
-          {/* Product Section */}
+          {/* Program & T-Shirt Section */}
           <div className="mb-6 pb-6 border-b">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Selected Product</h2>
-            {productData && (
-              <div className="bg-gray-50 rounded-lg p-4">
-                {product.isYetiKit || productData.name === 'YETI Kit' ? (
-                  <div className="space-y-3">
-                    <p className="font-medium text-gray-900">{productData.name}</p>
-                    <div className="mt-2 pt-2 border-t border-gray-200">
-                      <p className="text-xs font-medium text-gray-600 mb-2">Kit Items:</p>
-                      <ul className="text-sm text-gray-600 space-y-2">
-                        <li className="flex justify-between">
-                          <span>• YETI Rambler 8oz Stackable Cup</span>
-                          <span className="font-medium">{product.yeti8ozColor || 'Not selected'}</span>
-                        </li>
-                        <li className="flex justify-between">
-                          <span>• YETI Rambler 26oz Straw Bottle</span>
-                          <span className="font-medium">{product.yeti26ozColor || 'Not selected'}</span>
-                        </li>
-                        <li className="flex justify-between">
-                          <span>• YETI Rambler 35oz Tumbler with Straw Lid</span>
-                          <span className="font-medium">{product.yeti35ozColor || 'Not selected'}</span>
-                        </li>
-                      </ul>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <p className="font-medium text-gray-900">{productData.name}</p>
-                    {product.color && <p className="text-sm text-gray-600">Color: {product.color}</p>}
-                    {product.size && <p className="text-sm text-gray-600">Size: {product.size}</p>}
-                  </>
-                )}
-              </div>
-            )}
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Selected Items</h2>
+            <div className="space-y-4">
+              {/* T-Shirt */}
+              {tshirtProduct && (
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <p className="font-medium text-gray-900">{tshirtProduct.name}</p>
+                  <p className="text-sm text-gray-600">Size: {tshirtSize}</p>
+                </div>
+              )}
+
+              {/* Kit */}
+              {kitProduct && (
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <p className="font-medium text-gray-900">{kitProduct.name}</p>
+                  {kitProduct.description && (
+                    <p className="text-sm text-gray-600 mt-1">{kitProduct.description}</p>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Shipping Information Section */}
           <div className="mb-6 pb-6 border-b">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">Shipping Information</h2>
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Your Information</h2>
             <div className="bg-gray-50 rounded-lg p-4">
-              <p className="font-medium text-gray-900">{shipping.email}</p>
+              <p className="font-medium text-gray-900">{shipping.firstName} {shipping.lastName}</p>
+              <p className="text-sm text-gray-600">{shipping.email}</p>
+            </div>
+          </div>
+
+          {/* Shipping Address Section */}
+          <div className="mb-6 pb-6 border-b">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Shipping Address</h2>
+            <div className="bg-gray-50 rounded-lg p-4">
               <p className="font-medium text-gray-900">{shipping.name}</p>
+              {shipping.attention && <p className="text-sm text-gray-600">Attn: {shipping.attention}</p>}
               <p className="text-sm text-gray-600">{shipping.address}</p>
               {shipping.address2 && <p className="text-sm text-gray-600">{shipping.address2}</p>}
               <p className="text-sm text-gray-600">
@@ -187,8 +229,8 @@ export default function ReviewPage() {
             <button
               onClick={handleSubmit}
               disabled={submitting}
-              className="px-6 py-2 text-black rounded-md hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[#ffb500] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-              style={{ backgroundColor: '#ffb500' }}
+              className="px-6 py-2 text-white rounded-md hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[#c8102e] focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+              style={{ backgroundColor: '#c8102e' }}
             >
               {submitting ? 'Submitting...' : 'Submit Order →'}
             </button>

@@ -2,108 +2,113 @@
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import StrykerLogo from '@/components/StrykerLogo'
 import AdminExportButton from '@/components/AdminExportButton'
 import HelpIcon from '@/components/HelpIcon'
+import RALogo from '@/components/RALogo'
+import FlyingPlanes from '@/components/FlyingPlanes'
+import { supabase } from '@/lib/supabase'
 
-// Allowed email addresses (case-insensitive)
-const ALLOWED_EMAILS = [
-  'abhishek.choudhary01@stryker.com',
-  'ruchika.sikri@stryker.com',
-  'ravindra.singh@stryker.com',
-  'sunil.malodia@stryker.com',
-  'shaun.wernette@stryker.com',
-  'diane.riepl@stryker.com',
-  'heather.maurer@stryker.com',
-  'raghu.birru@stryker.com',
-  'roger.pluijm@stryker.com',
-  'patrice.poirier@stryker.com',
-  'cindy.lutz@stryker.com',
-  'debatra.sengupta@stryker.com',
-  'khadiza.hussain@stryker.com',
-  'shalini.ramesh@stryker.com',
-  'michelle.yarger@stryker.com',
-  'john.rossman@stryker.com',
-  'epaphra.sattenapalli@stryker.com',
-  'bobby.dack@stryker.com'
-]
-
-const ADMIN_EMAIL = 'josh.rakosky@proforma.com'
+const ADMIN_CODE = 'ADMIN'
 
 export default function LandingPage() {
   const router = useRouter()
-  const [email, setEmail] = useState('')
+  const [code, setCode] = useState('')
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
   const handleStart = async (e: React.FormEvent) => {
     e.preventDefault()
     
-    if (!email) {
-      setError('Please enter your email address')
+    if (!code) {
+      setError('Please enter your access code')
       return
     }
 
-    // Normalize email to lowercase for comparison
-    const normalizedEmail = email.toLowerCase().trim()
+    // Normalize code to uppercase
+    const normalizedCode = code.toUpperCase().trim()
 
-    // Check if admin email
-    if (normalizedEmail === ADMIN_EMAIL.toLowerCase()) {
-      sessionStorage.setItem('userEmail', normalizedEmail)
+    setLoading(true)
+
+    // Check if admin code first (ADMIN is 5 letters, special case)
+    if (normalizedCode === ADMIN_CODE) {
+      sessionStorage.setItem('userCode', normalizedCode)
       sessionStorage.setItem('adminAuth', 'true')
-      router.push('/product')
+      router.push('/admin')
       return
     }
 
-    // Check if email is in allowed list (case-insensitive)
-    const isAllowed = ALLOWED_EMAILS.some(
-      allowedEmail => allowedEmail.toLowerCase() === normalizedEmail
-    )
-
-    if (!isAllowed) {
-      setError('This email is not authorized to access the site. Please contact support.')
+    // Validate code format (6 capital letters for regular users)
+    if (!/^[A-Z]{6}$/.test(normalizedCode)) {
+      setError('Code must be exactly 6 capital letters')
+      setLoading(false)
       return
     }
 
-    // Store user email and clear admin auth for regular users
-    sessionStorage.setItem('userEmail', normalizedEmail)
+    // Check if code has already been used (one order per code)
+    const { data: existingOrder, error: checkError } = await supabase
+      .from('ra_new_hire_orders')
+      .select('id')
+      .eq('code', normalizedCode)
+      .single()
+
+    if (checkError && checkError.code !== 'PGRST116') {
+      // PGRST116 is "not found" error, which is fine
+      console.error('Error checking code:', checkError)
+      setError('Error validating code. Please try again.')
+      setLoading(false)
+      return
+    }
+
+    if (existingOrder) {
+      setError('This code has already been used. Each code can only be used once.')
+      setLoading(false)
+      return
+    }
+
+    // Store user code and clear admin auth for regular users
+    sessionStorage.setItem('userCode', normalizedCode)
     sessionStorage.removeItem('adminAuth')
 
-    // Navigate to product selection page
-    router.push('/product')
+    // Navigate to program selection page
+    router.push('/program')
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-50 to-yellow-50 px-4 relative">
+    <div className="min-h-screen flex items-center justify-center px-4 relative" style={{ backgroundColor: '#00263a' }}>
+      <FlyingPlanes />
       <AdminExportButton />
       <HelpIcon />
-      <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8">
+      <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8 relative z-10">
         <div className="text-center mb-8">
-          <div className="mb-4 flex justify-center">
-            <StrykerLogo className="text-3xl" />
+          <div className="mb-3 flex justify-center">
+            <RALogo className="max-w-[100px]" />
           </div>
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">
-            Enterprise Digital and Technology
-          </h1>
+          <h2 className="text-2xl font-semibold text-gray-700 mb-4">
+            New Hires
+          </h2>
           <p className="text-gray-600">
-            Enter your email to start shopping
+            Enter your 6-letter access code to begin
           </p>
         </div>
 
         <form onSubmit={handleStart} className="space-y-6">
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
-              Email
+            <label htmlFor="code" className="block text-sm font-medium text-gray-700 mb-2">
+              Access Code
             </label>
             <input
-              type="email"
-              id="email"
-              value={email}
+              type="text"
+              id="code"
+              value={code}
               onChange={(e) => {
-                setEmail(e.target.value)
+                // Only allow letters, convert to uppercase, limit to 6 characters (or allow ADMIN which is 5)
+                const value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6)
+                setCode(value)
                 setError('')
               }}
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#ffb500] focus:border-transparent text-black bg-white"
-              placeholder="Enter your email"
+              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#c8102e] focus:border-transparent text-black bg-white text-center text-2xl font-mono tracking-widest"
+              placeholder="ABCDEF"
+              maxLength={6}
               required
             />
             {error && (
@@ -113,10 +118,11 @@ export default function LandingPage() {
 
           <button
             type="submit"
-            className="w-full text-black py-3 px-4 rounded-md hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[#ffb500] focus:ring-offset-2 transition-colors font-medium"
-            style={{ backgroundColor: '#ffb500' }}
+            disabled={loading}
+            className="w-full text-white py-3 px-4 rounded-md hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[#c8102e] focus:ring-offset-2 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ backgroundColor: '#c8102e' }}
           >
-            Start Shopping →
+            {loading ? 'Validating...' : 'Continue →'}
           </button>
         </form>
       </div>
