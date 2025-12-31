@@ -155,6 +155,13 @@ export default function KitSelectionPage() {
                       {kit.name}
                     </h3>
 
+                    {/* Help text about clicking product names */}
+                    {kit.kit_items && kit.kit_items.length > 0 && (
+                      <p className="text-gray-500 text-xs mb-2 italic">
+                        Click product names below to view thumbnails
+                      </p>
+                    )}
+
                     {/* Inventory Status */}
                     <div className="mb-4">
                       {isOutOfStock ? (

@@ -24,7 +24,7 @@ WHERE category = 'kit'
 -- LIFT Kit 1 - Add kit-specific items
 UPDATE ra_new_hire_products
 SET kit_items = kit_items || '[
-  {"name": "LIFT Academy Heritage Backpack", "thumbnail_url": "/images/LIFT-KIT-NH-HERITAGE.png"},
+  {"name": "LIFT Academy Heritage Backpack", "thumbnail_url": "/images/LIFT-KIT-NH-BACKPACK.png"},
   {"name": "LIFT Academy Neoskin RFID Passport Holder", "thumbnail_url": "/images/LIFT-KIT-NH-PASSPORT.png"}
 ]'::jsonb
 WHERE customer_item_number = 'LIFT-KIT-NEWHIRE-1';
@@ -59,7 +59,7 @@ WHERE customer_item_number = 'LIFT-KIT-NEWHIRE-4';
 -- RA Kit 1 - Add kit-specific items
 UPDATE ra_new_hire_products
 SET kit_items = kit_items || '[
-  {"name": "Republic Airways Heritage Backpack", "thumbnail_url": "/images/RA-KIT-NH-HERITAGE.png"},
+  {"name": "Republic Airways Heritage Backpack", "thumbnail_url": "/images/RA-KIT-NH-BACKPACK.png"},
   {"name": "Republic Airways Neoskin RFID Passport Holder", "thumbnail_url": "/images/RA-KIT-NH-PASSPORT.png"}
 ]'::jsonb
 WHERE customer_item_number = 'RA-KIT-NEWHIRE-1';
@@ -111,7 +111,7 @@ ORDER BY program, customer_item_number;
 --   - RA-KIT-BADGE.png
 --   - RA-KIT-BEST.png
 -- LIFT Kit 1:
---   - LIFT-KIT-NH-HERITAGE.png
+--   - LIFT-KIT-NH-BACKPACK.png
 --   - LIFT-KIT-NH-PASSPORT.png
 -- LIFT Kit 2:
 --   - LIFT-KIT-NH-WALLET.png
@@ -126,7 +126,7 @@ ORDER BY program, customer_item_number;
 --   - LIFT-KIT-NH-POWERBANK.png
 --   - LIFT-KIT-NH-EARBUDS.png
 -- RA Kit 1:
---   - RA-KIT-NH-HERITAGE.png
+--   - RA-KIT-NH-BACKPACK.png
 --   - RA-KIT-NH-PASSPORT.png
 -- RA Kit 2:
 --   - RA-KIT-NH-WALLET.png
