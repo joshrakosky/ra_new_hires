@@ -1,12 +1,14 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import * as XLSX from 'xlsx'
 import { OrderWithItems } from '@/types'
 import HelpIcon from '@/components/HelpIcon'
 
 export default function AdminPage() {
+  const router = useRouter()
   const [orders, setOrders] = useState<OrderWithItems[]>([])
   const [loading, setLoading] = useState(true)
   const [authenticated, setAuthenticated] = useState(false)
@@ -191,6 +193,16 @@ export default function AdminPage() {
       <HelpIcon />
       <div className="max-w-7xl mx-auto">
         <div className="bg-white rounded-lg shadow-lg p-8">
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={() => router.push('/')}
+              className="px-6 py-2 text-white rounded-md hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[#c8102e] focus:ring-offset-2 font-medium"
+              style={{ backgroundColor: '#c8102e' }}
+            >
+              ← Back to Landing Page
+            </button>
+          </div>
           <div className="flex justify-between items-center mb-6">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">Republic Airways New Hires - Order Management</h1>

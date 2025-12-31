@@ -46,7 +46,7 @@ These items are included in all kits (both RA and LIFT):
 ## 4. Republic Airways Kit-Specific Items
 
 ### RA Kit 1
-- `RA-KIT-NH-BACKPACK.png` - Republic Airways Heritage Backpack
+- `RA-KIT-NH-BACKPACK.png` - Republic Airways Mercer+Mettle Pack
 - `RA-KIT-NH-PASSPORT.png` - Republic Airways Neoskin RFID Passport Holder
 
 ### RA Kit 2
@@ -69,7 +69,7 @@ These items are included in all kits (both RA and LIFT):
 ## 5. LIFT Academy Kit-Specific Items
 
 ### LIFT Kit 1
-- `LIFT-KIT-NH-BACKPACK.png` - LIFT Academy Heritage Backpack
+- `LIFT-KIT-NH-BACKPACK.png` - LIFT Academy Mercer+Mettle Pack
 - `LIFT-KIT-NH-PASSPORT.png` - LIFT Academy Neoskin RFID Passport Holder
 
 ### LIFT Kit 2
