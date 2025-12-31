@@ -63,11 +63,6 @@ export default function ProgramSelectionPage() {
               <div className="mb-4">
                 <ProgramLogo program="RA" className="h-32" />
               </div>
-              {selectedProgram === 'RA' && (
-                <div className="mt-4 text-[#c8102e] font-semibold text-lg">
-                  ✓ Selected
-                </div>
-              )}
             </div>
           </button>
 
@@ -82,11 +77,6 @@ export default function ProgramSelectionPage() {
               <div className="mb-4">
                 <ProgramLogo program="LIFT" className="h-32" />
               </div>
-              {selectedProgram === 'LIFT' && (
-                <div className="mt-4 text-[#c8102e] font-semibold text-lg">
-                  ✓ Selected
-                </div>
-              )}
             </div>
           </button>
         </div>
@@ -95,14 +85,24 @@ export default function ProgramSelectionPage() {
           <p className="text-center text-red-400 mb-4">{error}</p>
         )}
 
-        <button
-          onClick={handleContinue}
-          disabled={!selectedProgram}
-          className="w-full text-white py-3 px-4 rounded-md hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[#c8102e] focus:ring-offset-2 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-          style={{ backgroundColor: '#c8102e' }}
-        >
-          Continue to T-Shirt Selection →
-        </button>
+        <div className="mt-8 flex justify-between">
+          <button
+            type="button"
+            onClick={() => router.push('/')}
+            className="px-6 py-2 text-white rounded-md hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[#c8102e] focus:ring-offset-2 font-medium"
+            style={{ backgroundColor: '#c8102e' }}
+          >
+            ← Back
+          </button>
+          <button
+            onClick={handleContinue}
+            disabled={!selectedProgram}
+            className="px-6 py-2 text-white rounded-md hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[#c8102e] focus:ring-offset-2 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{ backgroundColor: '#c8102e' }}
+          >
+            Continue to T-Shirt Selection →
+          </button>
+        </div>
       </div>
     </div>
   )

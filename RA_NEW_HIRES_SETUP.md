@@ -5,11 +5,16 @@ This application has been updated for Republic Airways New Hires program. Users 
 
 ## Database Setup
 
-### 1. Run the SQL Schema
-Execute the SQL file `supabase-schema-ra-new-hires.sql` in your Supabase SQL Editor to create:
-- `ra_new_hire_products` - Product catalog with inventory tracking
-- `ra_new_hire_orders` - Order information (one order per code)
-- `ra_new_hire_order_items` - Individual items in each order
+### 1. Run the SQL Migrations
+All database migrations are organized in the `migrations/` folder. See `migrations/README.md` for the complete migration order and details.
+
+**Quick Start:**
+1. Run `migrations/01-schema.sql` to create the database structure:
+   - `ra_new_hire_products` - Product catalog with inventory tracking
+   - `ra_new_hire_orders` - Order information (one order per code)
+   - `ra_new_hire_order_items` - Individual items in each order
+
+2. Run the remaining migrations in order as documented in `migrations/README.md`
 
 ### 2. Product Structure
 

@@ -88,6 +88,10 @@ export default function TShirtSizePage() {
     return inventory !== null && inventory > 0
   }
 
+  const hasAnyAvailableSize = (): boolean => {
+    return sizes.some(size => isSizeAvailable(size))
+  }
+
   const handleContinue = () => {
     if (!selectedSize) {
       setError('Please select a t-shirt size')
@@ -128,7 +132,9 @@ export default function TShirtSizePage() {
         </div>
 
         {tshirtProduct && (
-          <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+          <div className={`bg-white rounded-lg shadow-lg p-6 mb-6 ${
+            !hasAnyAvailableSize() ? 'opacity-50 grayscale' : ''
+          }`}>
             {/* T-Shirt Thumbnail */}
             {tshirtProduct.thumbnail_url && (
               <div className="mb-4 flex justify-center">
@@ -159,14 +165,27 @@ export default function TShirtSizePage() {
               <label htmlFor="size" className="block text-sm font-medium text-gray-700 mb-2">
                 Size *
               </label>
+              {!hasAnyAvailableSize() && (
+                <div className="mb-2 p-2 bg-red-50 border border-red-200 rounded-md">
+                  <p className="text-red-600 font-semibold text-sm">All sizes are currently out of stock</p>
+                </div>
+              )}
               <select
                 id="size"
                 value={selectedSize}
                 onChange={(e) => {
-                  setSelectedSize(e.target.value as TShirtSize)
-                  setError('')
+                  const newSize = e.target.value as TShirtSize
+                  if (newSize && isSizeAvailable(newSize)) {
+                    setSelectedSize(newSize)
+                    setError('')
+                  } else if (newSize && !isSizeAvailable(newSize)) {
+                    setError('This size is out of stock')
+                  } else {
+                    setSelectedSize('' as TShirtSize)
+                    setError('')
+                  }
                 }}
-                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#c8102e] focus:border-transparent text-black bg-white"
+                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#c8102e] focus:border-transparent text-black bg-white disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <option value="">Select a size</option>
                 {sizes.map((size) => {
@@ -177,6 +196,7 @@ export default function TShirtSizePage() {
                       key={size}
                       value={size}
                       disabled={!available}
+                      style={!available ? { color: '#9ca3af', fontStyle: 'italic' } : {}}
                     >
                       {size}
                       {inventory !== null && ` (${inventory} available)`}
@@ -197,7 +217,8 @@ export default function TShirtSizePage() {
           <button
             type="button"
             onClick={() => router.push('/program')}
-            className="px-6 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+            className="px-6 py-2 text-white rounded-md hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[#c8102e] focus:ring-offset-2 font-medium"
+            style={{ backgroundColor: '#c8102e' }}
           >
             ← Back
           </button>

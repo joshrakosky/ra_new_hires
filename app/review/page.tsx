@@ -222,7 +222,8 @@ export default function ReviewPage() {
             <button
               type="button"
               onClick={() => router.push('/shipping')}
-              className="px-6 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+              className="px-6 py-2 text-white rounded-md hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[#c8102e] focus:ring-offset-2 font-medium"
+              style={{ backgroundColor: '#c8102e' }}
             >
               ← Back
             </button>

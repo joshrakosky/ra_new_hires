@@ -5,8 +5,14 @@ import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import AdminExportButton from '@/components/AdminExportButton'
 import HelpIcon from '@/components/HelpIcon'
+import ProductThumbnailModal from '@/components/ProductThumbnailModal'
 
 type Program = 'RA' | 'LIFT'
+
+interface KitItem {
+  name: string
+  thumbnail_url?: string
+}
 
 interface KitProduct {
   id: string
@@ -14,6 +20,7 @@ interface KitProduct {
   description?: string
   thumbnail_url?: string
   inventory: number
+  kit_items?: KitItem[] // JSONB array of products included in the kit
 }
 
 export default function KitSelectionPage() {
@@ -23,6 +30,8 @@ export default function KitSelectionPage() {
   const [selectedKitId, setSelectedKitId] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [modalProduct, setModalProduct] = useState<KitItem | null>(null)
+  const [isModalOpen, setIsModalOpen] = useState(false)
 
   useEffect(() => {
     // Check if user has selected a program and t-shirt size
@@ -49,7 +58,7 @@ export default function KitSelectionPage() {
       // Order by customer_item_number to ensure Kit 1, 2, 3, 4 order
       const { data, error } = await supabase
         .from('ra_new_hire_products')
-        .select('id, name, description, thumbnail_url, inventory, customer_item_number')
+        .select('id, name, description, thumbnail_url, inventory, customer_item_number, kit_items')
         .eq('category', 'kit')
         .eq('program', programType)
         .order('customer_item_number')
@@ -62,6 +71,11 @@ export default function KitSelectionPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleProductClick = (product: KitItem) => {
+    setModalProduct(product)
+    setIsModalOpen(true)
   }
 
   const handleKitSelect = (kitId: string) => {
@@ -125,39 +139,24 @@ export default function KitSelectionPage() {
                 const isOutOfStock = kit.inventory <= 0
 
                 return (
-                  <button
+                  <div
                     key={kit.id}
                     onClick={() => !isOutOfStock && handleKitSelect(kit.id)}
-                    disabled={isOutOfStock}
-                    className={`bg-white rounded-lg shadow-lg p-6 hover:shadow-xl transition-all text-left ${
+                    className={`bg-white rounded-lg shadow-lg p-6 transition-all text-left ${
                       isSelected ? 'ring-4 ring-[#c8102e]' : ''
-                    } ${isOutOfStock ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                    } ${
+                      isOutOfStock 
+                        ? 'opacity-50 cursor-not-allowed grayscale' 
+                        : 'hover:shadow-xl cursor-pointer'
+                    }`}
                   >
-                    {/* Kit Thumbnail */}
-                    {kit.thumbnail_url && (
-                      <div className="mb-4 flex justify-center">
-                        <img
-                          src={kit.thumbnail_url}
-                          alt={kit.name}
-                          className="max-w-full h-48 object-contain"
-                        />
-                      </div>
-                    )}
-
-                    {/* Kit Name */}
+                    {/* Kit Name - moved to top */}
                     <h3 className="text-xl font-bold text-gray-900 mb-2">
                       {kit.name}
                     </h3>
 
-                    {/* Kit Description */}
-                    {kit.description && (
-                      <p className="text-gray-600 text-sm mb-2">
-                        {kit.description}
-                      </p>
-                    )}
-
                     {/* Inventory Status */}
-                    <div className="mt-4">
+                    <div className="mb-4">
                       {isOutOfStock ? (
                         <span className="text-red-600 font-semibold">Out of Stock</span>
                       ) : (
@@ -167,13 +166,29 @@ export default function KitSelectionPage() {
                       )}
                     </div>
 
-                    {/* Selected Indicator */}
-                    {isSelected && (
-                      <div className="mt-2 text-[#c8102e] font-semibold">
-                        ✓ Selected
+                    {/* Includes the following section */}
+                    {kit.kit_items && kit.kit_items.length > 0 && (
+                      <div className="mb-4">
+                        <p className="text-gray-700 font-medium mb-2">Includes the following:</p>
+                        <ul className="list-disc list-inside space-y-1">
+                          {kit.kit_items.map((item, index) => (
+                            <li key={index} className="text-gray-600 text-sm">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleProductClick(item)
+                                }}
+                                className="text-[#c8102e] hover:underline cursor-pointer"
+                              >
+                                {item.name}
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
                       </div>
                     )}
-                  </button>
+                  </div>
                 )
               })}
             </div>
@@ -186,7 +201,8 @@ export default function KitSelectionPage() {
               <button
                 type="button"
                 onClick={() => router.push('/tshirt-size')}
-                className="px-6 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                className="px-6 py-2 text-white rounded-md hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[#c8102e] focus:ring-offset-2 font-medium"
+                style={{ backgroundColor: '#c8102e' }}
               >
                 ← Back
               </button>
@@ -202,6 +218,16 @@ export default function KitSelectionPage() {
           </>
         )}
       </div>
+
+      {/* Product Thumbnail Modal */}
+      {modalProduct && (
+        <ProductThumbnailModal
+          isOpen={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
+          productName={modalProduct.name}
+          thumbnailUrl={modalProduct.thumbnail_url}
+        />
+      )}
     </div>
   )
 }
