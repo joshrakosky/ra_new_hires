@@ -175,7 +175,7 @@ export default function AdminExportButton() {
           return product.inventory < 0
         } else if (product.category === 'tshirt' && product.inventory_by_size) {
           // For t-shirts, check if any size has negative inventory
-          return Object.values(product.inventory_by_size).some(inv => inv < 0)
+          return Object.values(product.inventory_by_size).some((inv: number) => inv < 0)
         }
         return false
       }) || []
