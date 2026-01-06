@@ -671,7 +671,7 @@ export default function AdminPage() {
                   </button>
                 </div>
               </>
-            ) : (
+            ) : confirmCancel ? (
               // Confirmation Dialog
               <>
                 <h2 className="text-xl font-bold text-gray-900 mb-4">Cancel Order?</h2>
@@ -697,7 +697,7 @@ export default function AdminPage() {
                   </button>
                 </div>
               </>
-            )}
+            ) : null}
           </div>
         </div>
       )}
