@@ -175,7 +175,7 @@ export default function AdminExportButton() {
           return product.inventory < 0
         } else if (product.category === 'tshirt' && product.inventory_by_size) {
           // For t-shirts, check if any size has negative inventory
-          return Object.values(product.inventory_by_size).some((inv: number) => inv < 0)
+          return Object.values(product.inventory_by_size as Record<string, number>).some((inv: number) => inv < 0)
         }
         return false
       }) || []
@@ -209,7 +209,7 @@ export default function AdminExportButton() {
           }
         } else if (product.category === 'tshirt' && product.inventory_by_size) {
           // T-shirt backorder - check each size
-          Object.entries(product.inventory_by_size).forEach(([size, inventory]) => {
+          Object.entries(product.inventory_by_size as Record<string, number>).forEach(([size, inventory]) => {
             if (inventory < 0) {
               // Find all orders that contain this t-shirt size
               const ordersWithProduct = ordersWithItems.filter(order =>
