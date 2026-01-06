@@ -44,7 +44,21 @@ export default function LandingPage() {
       return
     }
 
-    // Check if code has already been used (one order per code)
+    // Check if code exists in access codes table and is not used
+    const { data: accessCode, error: codeCheckError } = await supabase
+      .from('ra_new_hire_access_codes')
+      .select('id, used')
+      .eq('code', normalizedCode)
+      .single()
+
+    // If code exists in access codes table, check if it's been used
+    if (accessCode && accessCode.used) {
+      setError('This code has already been used.')
+      setLoading(false)
+      return
+    }
+
+    // Check if code has already been used in an order (one order per code)
     const { data: existingOrder, error: checkError } = await supabase
       .from('ra_new_hire_orders')
       .select('id')

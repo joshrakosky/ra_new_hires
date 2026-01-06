@@ -49,31 +49,39 @@ async function updateInventory(productId: string, size: string | null, quantity:
     // Get current product data
     const { data: product, error: fetchError } = await supabase
       .from('ra_new_hire_products')
-      .select('inventory, inventory_by_size')
+      .select('inventory, inventory_by_size, category')
       .eq('id', productId)
       .single()
 
     if (fetchError) throw fetchError
 
-    // Update overall inventory
-    const newInventory = Math.max(0, (product.inventory || 0) - quantity)
+    // Allow negative inventory for all products (backorder enabled)
+    const newInventory = (product.inventory || 0) - quantity
 
-    // Update size-specific inventory if size is provided
+    // Update size-specific inventory if size is provided (allow negative for backorder)
     let newInventoryBySize = product.inventory_by_size || {}
     if (size && newInventoryBySize[size] !== undefined) {
       newInventoryBySize = {
         ...newInventoryBySize,
-        [size]: Math.max(0, (newInventoryBySize[size] || 0) - quantity)
+        [size]: (newInventoryBySize[size] || 0) - quantity
       }
+    }
+
+    // Prepare update object - only include inventory_by_size if it was modified or exists
+    const updateData: { inventory: number; inventory_by_size?: Record<string, number> } = {
+      inventory: newInventory
+    }
+    
+    // Only update inventory_by_size if size was provided (for t-shirts)
+    // For kits (size is null), preserve the existing inventory_by_size value
+    if (size && newInventoryBySize[size] !== undefined) {
+      updateData.inventory_by_size = newInventoryBySize
     }
 
     // Update product inventory
     const { error: updateError } = await supabase
       .from('ra_new_hire_products')
-      .update({
-        inventory: newInventory,
-        inventory_by_size: newInventoryBySize
-      })
+      .update(updateData)
       .eq('id', productId)
 
     if (updateError) throw updateError
@@ -99,6 +107,13 @@ export async function POST(request: NextRequest) {
     // Normalize code to uppercase
     const normalizedCode = code.toUpperCase().trim()
 
+    // Check if code exists in access codes table and mark as used
+    const { data: accessCode } = await supabase
+      .from('ra_new_hire_access_codes')
+      .select('id, used')
+      .eq('code', normalizedCode)
+      .single()
+
     // Check for duplicate order by code (one order per code)
     const { data: existingOrder } = await supabase
       .from('ra_new_hire_orders')
@@ -109,6 +124,14 @@ export async function POST(request: NextRequest) {
     if (existingOrder) {
       return NextResponse.json(
         { error: 'This code has already been used. Each code can only be used once.' },
+        { status: 400 }
+      )
+    }
+
+    // If code exists in access codes table and is already marked as used, reject
+    if (accessCode && accessCode.used) {
+      return NextResponse.json(
+        { error: 'This code has already been used.' },
         { status: 400 }
       )
     }
@@ -208,6 +231,18 @@ export async function POST(request: NextRequest) {
       .insert(orderItems)
 
     if (itemsError) throw itemsError
+
+    // Mark code as used in access codes table if it exists
+    if (accessCode) {
+      await supabase
+        .from('ra_new_hire_access_codes')
+        .update({
+          used: true,
+          used_at: new Date().toISOString(),
+          order_id: order.id
+        })
+        .eq('id', accessCode.id)
+    }
 
     return NextResponse.json({
       success: true,

@@ -79,13 +79,9 @@ export default function KitSelectionPage() {
   }
 
   const handleKitSelect = (kitId: string) => {
-    const kit = kits.find(k => k.id === kitId)
-    if (kit && kit.inventory > 0) {
-      setSelectedKitId(kitId)
-      setError('')
-    } else {
-      setError('This kit is out of stock')
-    }
+    // Allow selection of any kit (backorders allowed)
+    setSelectedKitId(kitId)
+    setError('')
   }
 
   const handleContinue = () => {
@@ -94,13 +90,7 @@ export default function KitSelectionPage() {
       return
     }
 
-    const selectedKit = kits.find(k => k.id === selectedKitId)
-    if (!selectedKit || selectedKit.inventory <= 0) {
-      setError('Selected kit is out of stock')
-      return
-    }
-
-    // Store selected kit ID
+    // Store selected kit ID (backorders allowed, no inventory check needed)
     sessionStorage.setItem('selectedKitId', selectedKitId)
 
     // Navigate to shipping page
@@ -136,19 +126,16 @@ export default function KitSelectionPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
               {kits.map((kit) => {
                 const isSelected = selectedKitId === kit.id
-                const isOutOfStock = kit.inventory <= 0
+                // Show backorder status if inventory is negative
+                const isBackordered = kit.inventory < 0
 
                 return (
                   <div
                     key={kit.id}
-                    onClick={() => !isOutOfStock && handleKitSelect(kit.id)}
+                    onClick={() => handleKitSelect(kit.id)}
                     className={`bg-white rounded-lg shadow-lg p-6 transition-all text-left ${
                       isSelected ? 'ring-4 ring-[#c8102e]' : ''
-                    } ${
-                      isOutOfStock 
-                        ? 'opacity-50 cursor-not-allowed grayscale' 
-                        : 'hover:shadow-xl cursor-pointer'
-                    }`}
+                    } hover:shadow-xl cursor-pointer`}
                   >
                     {/* Kit Name - moved to top */}
                     <h3 className="text-xl font-bold text-gray-900 mb-2">
@@ -164,8 +151,14 @@ export default function KitSelectionPage() {
 
                     {/* Inventory Status */}
                     <div className="mb-4">
-                      {isOutOfStock ? (
-                        <span className="text-red-600 font-semibold">Out of Stock</span>
+                      {isBackordered ? (
+                        <span className="text-orange-600 font-semibold">
+                          {Math.abs(kit.inventory)} backordered
+                        </span>
+                      ) : kit.inventory === 0 ? (
+                        <span className="text-gray-600 text-sm">
+                          Available (backorder)
+                        </span>
                       ) : (
                         <span className="text-gray-600 text-sm">
                           {kit.inventory} available

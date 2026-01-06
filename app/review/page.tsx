@@ -67,12 +67,12 @@ export default function ReviewPage() {
 
   const loadProducts = async (programType: Program, kitIdData: string) => {
     try {
-      // Load t-shirt product
+      // Load t-shirt product (always use 'RA' since t-shirts are consolidated)
       const { data: tshirtData, error: tshirtError } = await supabase
         .from('ra_new_hire_products')
         .select('*')
         .eq('category', 'tshirt')
-        .eq('program', programType)
+        .eq('program', 'RA')
         .single()
 
       if (tshirtError) throw tshirtError

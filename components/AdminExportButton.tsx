@@ -34,19 +34,27 @@ export default function AdminExportButton() {
 
       if (ordersError) throw ordersError
 
-      // Fetch all products to get deco information
+      // Fetch all products to get deco information and current inventory
       const { data: productsData, error: productsError } = await supabase
         .from('ra_new_hire_products')
-        .select('id, deco')
+        .select('id, name, deco, category, inventory, inventory_by_size, customer_item_number')
 
       if (productsError) throw productsError
 
       // Create a map of product_id -> deco for quick lookup
       const productDecoMap = new Map<string, string>()
+      const productInfoMap = new Map<string, { name: string; category: string; inventory: number; inventory_by_size?: Record<string, number>; customer_item_number?: string }>()
       productsData?.forEach(product => {
         if (product.deco) {
           productDecoMap.set(product.id, product.deco)
         }
+        productInfoMap.set(product.id, {
+          name: product.name,
+          category: product.category,
+          inventory: product.inventory,
+          inventory_by_size: product.inventory_by_size,
+          customer_item_number: product.customer_item_number || undefined
+        })
       })
 
       // Fetch order items for each order
@@ -145,6 +153,95 @@ export default function AdminExportButton() {
       // Distribution Summary sheet
       const wsSummary = XLSX.utils.json_to_sheet(summaryData)
       XLSX.utils.book_append_sheet(wb, wsSummary, 'Distribution Summary')
+
+      // Sheet 3: Backorder Report
+      // Track products with negative inventory and which orders contain them
+      const backorderData: Array<{
+        'Product Name': string
+        'Customer Item #': string
+        'Category': string
+        'Size': string
+        'Current Inventory': number
+        'Backorder Quantity': number
+        'Order Numbers': string
+        'Order Dates': string
+        'Total Orders': number
+      }> = []
+
+      // Get all products with negative inventory (backorders)
+      const backorderedProducts = productsData?.filter(product => {
+        if (product.category === 'kit') {
+          // For kits, check overall inventory
+          return product.inventory < 0
+        } else if (product.category === 'tshirt' && product.inventory_by_size) {
+          // For t-shirts, check if any size has negative inventory
+          return Object.values(product.inventory_by_size).some(inv => inv < 0)
+        }
+        return false
+      }) || []
+
+      // For each backordered product, find orders that contain it
+      for (const product of backorderedProducts) {
+        const productInfo = productInfoMap.get(product.id)
+        if (!productInfo) continue
+
+        if (product.category === 'kit') {
+          // Kit backorder - check overall inventory
+          if (product.inventory < 0) {
+            // Find all orders that contain this kit
+            const ordersWithProduct = ordersWithItems.filter(order =>
+              order.items.some(item => item.product_id === product.id)
+            )
+
+            if (ordersWithProduct.length > 0) {
+              backorderData.push({
+                'Product Name': productInfo.name,
+                'Customer Item #': productInfo.customer_item_number || '',
+                'Category': 'Kit',
+                'Size': 'N/A',
+                'Current Inventory': product.inventory,
+                'Backorder Quantity': Math.abs(product.inventory),
+                'Order Numbers': ordersWithProduct.map(o => o.order_number).join(', '),
+                'Order Dates': ordersWithProduct.map(o => new Date(o.created_at).toLocaleDateString()).join(', '),
+                'Total Orders': ordersWithProduct.length
+              })
+            }
+          }
+        } else if (product.category === 'tshirt' && product.inventory_by_size) {
+          // T-shirt backorder - check each size
+          Object.entries(product.inventory_by_size).forEach(([size, inventory]) => {
+            if (inventory < 0) {
+              // Find all orders that contain this t-shirt size
+              const ordersWithProduct = ordersWithItems.filter(order =>
+                order.items.some(item =>
+                  item.product_id === product.id && item.size === size
+                )
+              )
+
+              if (ordersWithProduct.length > 0) {
+                backorderData.push({
+                  'Product Name': `${productInfo.name} - ${size}`,
+                  'Customer Item #': productInfo.customer_item_number ? `${productInfo.customer_item_number}-${size}` : '',
+                  'Category': 'T-Shirt',
+                  'Size': size,
+                  'Current Inventory': inventory,
+                  'Backorder Quantity': Math.abs(inventory),
+                  'Order Numbers': ordersWithProduct.map(o => o.order_number).join(', '),
+                  'Order Dates': ordersWithProduct.map(o => new Date(o.created_at).toLocaleDateString()).join(', '),
+                  'Total Orders': ordersWithProduct.length
+                })
+              }
+            }
+          })
+        }
+      }
+
+      // Sort backorder data by backorder quantity (descending)
+      backorderData.sort((a, b) => b['Backorder Quantity'] - a['Backorder Quantity'])
+
+      // Backorder Report sheet
+      const wsBackorder = XLSX.utils.json_to_sheet(backorderData)
+      XLSX.utils.book_append_sheet(wb, wsBackorder, 'Backorder Report')
 
       // Generate filename with current date
       const filename = `ra-new-hires-orders-${new Date().toISOString().split('T')[0]}.xlsx`

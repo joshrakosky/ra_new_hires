@@ -1,9 +1,10 @@
 # Test Codes for Republic Airways New Hires
 
-## Test Code: ABCDEF
+## Test Codes
 
-The code **ABCDEF** can be used for testing the complete order flow:
+The following codes can be used for testing the complete order flow:
 
+### ABCDEF
 1. Enter `ABCDEF` on the landing page
 2. Select program (RA or LIFT)
 3. Select t-shirt size
@@ -11,7 +12,15 @@ The code **ABCDEF** can be used for testing the complete order flow:
 5. Enter shipping information
 6. Review and submit order
 
-**Note:** Each code can only be used once. After testing with ABCDEF, you'll need to use a different code for subsequent tests, or delete the test order from the database.
+### ABCDEG
+1. Enter `ABCDEG` on the landing page
+2. Select program (RA or LIFT)
+3. Select t-shirt size
+4. Select a kit
+5. Enter shipping information
+6. Review and submit order
+
+**Note:** Each code can only be used once. After testing with a code, you'll need to use a different code for subsequent tests, or cancel/delete the test order from the admin panel to reuse the code.
 
 ## Admin Access
 

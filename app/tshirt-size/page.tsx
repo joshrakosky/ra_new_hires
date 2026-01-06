@@ -84,12 +84,22 @@ export default function TShirtSizePage() {
   }
 
   const isSizeAvailable = (size: string): boolean => {
+    // All sizes are available (backorders allowed)
     const inventory = getInventoryForSize(size)
-    return inventory !== null && inventory > 0
+    return inventory !== null
   }
 
   const hasAnyAvailableSize = (): boolean => {
-    return sizes.some(size => isSizeAvailable(size))
+    // Always return true since backorders are allowed
+    return true
+  }
+
+  const getInventoryDisplay = (size: string): string => {
+    const inventory = getInventoryForSize(size)
+    if (inventory === null) return ''
+    if (inventory < 0) return ` (${Math.abs(inventory)} backordered)`
+    if (inventory === 0) return ' (backorder)'
+    return ` (${inventory} available)`
   }
 
   const handleContinue = () => {
@@ -98,12 +108,7 @@ export default function TShirtSizePage() {
       return
     }
 
-    if (!isSizeAvailable(selectedSize)) {
-      setError('Selected size is out of stock')
-      return
-    }
-
-    // Store selected t-shirt size
+    // Store selected t-shirt size (backorders allowed, no inventory check needed)
     sessionStorage.setItem('tshirtSize', selectedSize)
 
     // Navigate to kit selection
@@ -132,9 +137,7 @@ export default function TShirtSizePage() {
         </div>
 
         {tshirtProduct && (
-          <div className={`bg-white rounded-lg shadow-lg p-6 mb-6 ${
-            !hasAnyAvailableSize() ? 'opacity-50 grayscale' : ''
-          }`}>
+          <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
             {/* T-Shirt Thumbnail */}
             {tshirtProduct.thumbnail_url && (
               <div className="mb-4 flex justify-center">
@@ -165,42 +168,25 @@ export default function TShirtSizePage() {
               <label htmlFor="size" className="block text-sm font-medium text-gray-700 mb-2">
                 Size *
               </label>
-              {!hasAnyAvailableSize() && (
-                <div className="mb-2 p-2 bg-red-50 border border-red-200 rounded-md">
-                  <p className="text-red-600 font-semibold text-sm">All sizes are currently out of stock</p>
-                </div>
-              )}
               <select
                 id="size"
                 value={selectedSize}
                 onChange={(e) => {
                   const newSize = e.target.value as TShirtSize
-                  if (newSize && isSizeAvailable(newSize)) {
-                    setSelectedSize(newSize)
-                    setError('')
-                  } else if (newSize && !isSizeAvailable(newSize)) {
-                    setError('This size is out of stock')
-                  } else {
-                    setSelectedSize('' as TShirtSize)
-                    setError('')
-                  }
+                  setSelectedSize(newSize)
+                  setError('')
                 }}
-                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#c8102e] focus:border-transparent text-black bg-white disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#c8102e] focus:border-transparent text-black bg-white"
               >
                 <option value="">Select a size</option>
                 {sizes.map((size) => {
-                  const inventory = getInventoryForSize(size)
-                  const available = isSizeAvailable(size)
+                  const inventoryDisplay = getInventoryDisplay(size)
                   return (
                     <option
                       key={size}
                       value={size}
-                      disabled={!available}
-                      style={!available ? { color: '#9ca3af', fontStyle: 'italic' } : {}}
                     >
-                      {size}
-                      {inventory !== null && ` (${inventory} available)`}
-                      {!available && ' - Out of Stock'}
+                      {size}{inventoryDisplay}
                     </option>
                   )
                 })}
@@ -224,7 +210,7 @@ export default function TShirtSizePage() {
           </button>
           <button
             onClick={handleContinue}
-            disabled={!selectedSize || !isSizeAvailable(selectedSize)}
+            disabled={!selectedSize}
             className="px-6 py-2 text-white rounded-md hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[#c8102e] focus:ring-offset-2 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ backgroundColor: '#c8102e' }}
           >
