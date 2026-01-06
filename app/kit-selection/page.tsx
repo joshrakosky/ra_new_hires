@@ -86,7 +86,7 @@ export default function KitSelectionPage() {
 
   const handleContinue = () => {
     if (!selectedKitId) {
-      setError('Please select a kit')
+      setError('Please select 1 of the above kits')
       return
     }
 
@@ -133,10 +133,27 @@ export default function KitSelectionPage() {
                   <div
                     key={kit.id}
                     onClick={() => handleKitSelect(kit.id)}
-                    className={`bg-white rounded-lg shadow-lg p-6 transition-all text-left ${
+                    className={`bg-white rounded-lg shadow-lg p-6 transition-all text-left relative ${
                       isSelected ? 'ring-4 ring-[#c8102e]' : ''
                     } hover:shadow-xl cursor-pointer`}
                   >
+                    {/* Red checkmark in top right corner when selected */}
+                    {isSelected && (
+                      <div className="absolute top-4 right-4">
+                        <svg
+                          className="w-8 h-8"
+                          fill="none"
+                          stroke="#c8102e"
+                          strokeWidth="3"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          viewBox="0 0 24 24"
+                        >
+                          <path d="M20 6L9 17l-5-5" />
+                        </svg>
+                      </div>
+                    )}
+
                     {/* Kit Name - moved to top */}
                     <h3 className="text-xl font-bold text-gray-900 mb-2">
                       {kit.name}

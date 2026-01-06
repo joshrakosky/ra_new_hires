@@ -239,7 +239,8 @@ export async function POST(request: NextRequest) {
         .update({
           used: true,
           used_at: new Date().toISOString(),
-          order_id: order.id
+          order_id: order.id,
+          email: email.toLowerCase()
         })
         .eq('id', accessCode.id)
     }

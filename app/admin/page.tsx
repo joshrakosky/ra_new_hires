@@ -20,6 +20,12 @@ export default function AdminPage() {
   const [generatedCodes, setGeneratedCodes] = useState<string[]>([])
   const [savingCodes, setSavingCodes] = useState(false)
   const [generatingCodes, setGeneratingCodes] = useState(false)
+  const [codeMessage, setCodeMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
+  const [showCodeManager, setShowCodeManager] = useState(false)
+  const [accessCodes, setAccessCodes] = useState<any[]>([])
+  const [loadingCodes, setLoadingCodes] = useState(false)
+  const [editingCodeId, setEditingCodeId] = useState<string | null>(null)
+  const [codeFilter, setCodeFilter] = useState<'all' | 'used' | 'unused'>('all')
 
   useEffect(() => {
     // Check if user is admin (ADMIN code)
@@ -37,6 +43,12 @@ export default function AdminPage() {
       window.location.href = '/'
     }
   }, [])
+
+  useEffect(() => {
+    if (showCodeManager) {
+      loadAccessCodes()
+    }
+  }, [showCodeManager])
 
   const loadOrders = async () => {
     try {
@@ -155,7 +167,8 @@ export default function AdminPage() {
           .update({
             used: false,
             used_at: null,
-            order_id: null
+            order_id: null,
+            email: null
           })
           .eq('id', accessCode.id)
       }
@@ -238,7 +251,10 @@ export default function AdminPage() {
 
   const handleSaveCodes = async () => {
     if (generatedCodes.length === 0) {
-      alert('No codes to save. Please generate codes first.')
+      setCodeMessage({
+        type: 'error',
+        message: 'No codes to save. Please generate codes first.'
+      })
       return
     }
 
@@ -255,7 +271,10 @@ export default function AdminPage() {
       const newCodes = generatedCodes.filter(code => !existingCodeSet.has(code))
 
       if (newCodes.length === 0) {
-        alert('All generated codes already exist in the database.')
+        setCodeMessage({
+          type: 'error',
+          message: 'All generated codes already exist in the database.'
+        })
         setSavingCodes(false)
         return
       }
@@ -267,19 +286,30 @@ export default function AdminPage() {
         created_by: 'admin'
       }))
 
-      const { error: insertError } = await supabase
+      const { data: insertedData, error: insertError } = await supabase
         .from('ra_new_hire_access_codes')
         .insert(codesToInsert)
+        .select()
 
-      if (insertError) throw insertError
+      if (insertError) {
+        console.error('Insert error details:', insertError)
+        throw new Error(insertError.message || `Database error: ${JSON.stringify(insertError)}`)
+      }
 
-      alert(`Successfully saved ${newCodes.length} code(s) to database.${existingCodeSet.size > 0 ? ` ${existingCodeSet.size} code(s) were already in the database.` : ''}`)
+      setCodeMessage({
+        type: 'success',
+        message: `Successfully saved ${newCodes.length} code(s) to database.${existingCodeSet.size > 0 ? ` ${existingCodeSet.size} code(s) were already in the database.` : ''}`
+      })
       
       // Remove saved codes from generated list
       setGeneratedCodes(generatedCodes.filter(code => existingCodeSet.has(code)))
     } catch (err: any) {
       console.error('Failed to save codes:', err)
-      alert(`Failed to save codes: ${err.message || 'Unknown error'}`)
+      const errorMessage = err.message || err.toString() || JSON.stringify(err) || 'Unknown error occurred'
+      setCodeMessage({
+        type: 'error',
+        message: `Failed to save codes: ${errorMessage}`
+      })
     } finally {
       setSavingCodes(false)
     }
@@ -304,6 +334,94 @@ export default function AdminPage() {
     const filename = `ra-new-hire-access-codes-${new Date().toISOString().split('T')[0]}.xlsx`
     XLSX.writeFile(wb, filename)
   }
+
+  const loadAccessCodes = async () => {
+    try {
+      setLoadingCodes(true)
+      const { data, error } = await supabase
+        .from('ra_new_hire_access_codes')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      setAccessCodes(data || [])
+    } catch (err: any) {
+      console.error('Failed to load access codes:', err)
+      setCodeMessage({
+        type: 'error',
+        message: `Failed to load codes: ${err.message || 'Unknown error'}`
+      })
+    } finally {
+      setLoadingCodes(false)
+    }
+  }
+
+  const handleToggleCodeStatus = async (codeId: string, currentStatus: boolean) => {
+    try {
+      setEditingCodeId(codeId)
+      const { error } = await supabase
+        .from('ra_new_hire_access_codes')
+        .update({
+          used: !currentStatus,
+          used_at: !currentStatus ? new Date().toISOString() : null,
+          email: !currentStatus ? null : undefined,
+          order_id: !currentStatus ? null : undefined
+        })
+        .eq('id', codeId)
+
+      if (error) throw error
+
+      await loadAccessCodes()
+      setCodeMessage({
+        type: 'success',
+        message: `Code ${!currentStatus ? 'marked as used' : 'marked as unused'} successfully.`
+      })
+    } catch (err: any) {
+      console.error('Failed to update code:', err)
+      setCodeMessage({
+        type: 'error',
+        message: `Failed to update code: ${err.message || 'Unknown error'}`
+      })
+    } finally {
+      setEditingCodeId(null)
+    }
+  }
+
+  const handleDeleteCode = async (codeId: string, code: string) => {
+    if (!confirm(`Are you sure you want to delete code ${code}? This cannot be undone.`)) {
+      return
+    }
+
+    try {
+      setEditingCodeId(codeId)
+      const { error } = await supabase
+        .from('ra_new_hire_access_codes')
+        .delete()
+        .eq('id', codeId)
+
+      if (error) throw error
+
+      await loadAccessCodes()
+      setCodeMessage({
+        type: 'success',
+        message: `Code ${code} deleted successfully.`
+      })
+    } catch (err: any) {
+      console.error('Failed to delete code:', err)
+      setCodeMessage({
+        type: 'error',
+        message: `Failed to delete code: ${err.message || 'Unknown error'}`
+      })
+    } finally {
+      setEditingCodeId(null)
+    }
+  }
+
+  useEffect(() => {
+    if (showCodeManager && accessCodes.length === 0) {
+      loadAccessCodes()
+    }
+  }, [showCodeManager])
 
   const exportToExcel = async () => {
     // Fetch all products to get deco information
@@ -446,10 +564,22 @@ export default function AdminPage() {
             </div>
             <div className="flex gap-4">
               <button
-                onClick={() => setShowCodeGenerator(!showCodeGenerator)}
+                onClick={() => {
+                  setShowCodeGenerator(!showCodeGenerator)
+                  if (!showCodeGenerator) setShowCodeManager(false)
+                }}
                 className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
               >
                 {showCodeGenerator ? 'Hide Code Generator' : 'Generate Codes'}
+              </button>
+              <button
+                onClick={() => {
+                  setShowCodeManager(!showCodeManager)
+                  if (!showCodeManager) setShowCodeGenerator(false)
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+              >
+                {showCodeManager ? 'Hide Code Manager' : 'Manage Codes'}
               </button>
               <button
                 onClick={loadOrders}
@@ -525,12 +655,136 @@ export default function AdminPage() {
                   <div className="bg-white rounded-md border border-gray-300 p-4 max-h-60 overflow-y-auto">
                     <div className="grid grid-cols-6 gap-2 font-mono text-sm">
                       {generatedCodes.map((code, index) => (
-                        <div key={index} className="px-2 py-1 bg-gray-50 rounded text-center">
+                        <div key={index} className="px-2 py-1 bg-gray-50 rounded text-center text-gray-900">
                           {code}
                         </div>
                       ))}
                     </div>
                   </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Code Manager Section */}
+          {showCodeManager && (
+            <div className="mb-6 p-6 bg-gray-50 rounded-lg border border-gray-200">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-bold text-gray-900">Access Code Manager</h2>
+                <div className="flex gap-2">
+                  <select
+                    value={codeFilter}
+                    onChange={(e) => setCodeFilter(e.target.value as 'all' | 'used' | 'unused')}
+                    className="px-3 py-1 border border-gray-300 rounded-md text-sm"
+                  >
+                    <option value="all">All Codes</option>
+                    <option value="used">Used Only</option>
+                    <option value="unused">Unused Only</option>
+                  </select>
+                  <button
+                    onClick={loadAccessCodes}
+                    disabled={loadingCodes}
+                    className="px-4 py-1 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 text-sm disabled:opacity-50"
+                  >
+                    {loadingCodes ? 'Loading...' : 'Refresh'}
+                  </button>
+                </div>
+              </div>
+
+              {loadingCodes ? (
+                <div className="text-center py-8 text-gray-600">Loading codes...</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 bg-white rounded-md">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Code
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Status
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Email
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Created
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Used At
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {accessCodes
+                        .filter(code => {
+                          if (codeFilter === 'used') return code.used
+                          if (codeFilter === 'unused') return !code.used
+                          return true
+                        })
+                        .map((code) => (
+                          <tr key={code.id}>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">
+                              {code.code}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm">
+                              {code.used ? (
+                                <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium">
+                                  Used
+                                </span>
+                              ) : (
+                                <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                                  Available
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                              {code.email || '-'}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                              {new Date(code.created_at).toLocaleDateString()}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                              {code.used_at ? new Date(code.used_at).toLocaleDateString() : '-'}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm">
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => handleToggleCodeStatus(code.id, code.used)}
+                                  disabled={editingCodeId === code.id}
+                                  className={`px-2 py-1 text-xs rounded-md ${
+                                    code.used
+                                      ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                                      : 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
+                                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                                  title={code.used ? 'Mark as unused' : 'Mark as used'}
+                                >
+                                  {editingCodeId === code.id ? 'Updating...' : code.used ? 'Mark Unused' : 'Mark Used'}
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteCode(code.id, code.code)}
+                                  disabled={editingCodeId === code.id}
+                                  className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded-md hover:bg-red-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  title="Delete code"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                  {accessCodes.filter(code => {
+                    if (codeFilter === 'used') return code.used
+                    if (codeFilter === 'unused') return !code.used
+                    return true
+                  }).length === 0 && (
+                    <div className="text-center py-8 text-gray-600">No codes found.</div>
+                  )}
                 </div>
               )}
             </div>
@@ -626,6 +880,47 @@ export default function AdminPage() {
           )}
         </div>
       </div>
+
+      {/* Code Save Message Modal */}
+      {codeMessage && (
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+            <div className="mb-4">
+              {codeMessage.type === 'success' ? (
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="flex-shrink-0 w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                    <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <h2 className="text-xl font-bold text-gray-900">Success</h2>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="flex-shrink-0 w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+                    <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </div>
+                  <h2 className="text-xl font-bold text-gray-900">Error</h2>
+                </div>
+              )}
+            </div>
+            <p className={`mb-6 ${codeMessage.type === 'success' ? 'text-gray-600' : 'text-red-600'}`}>
+              {codeMessage.message}
+            </p>
+            <div className="flex justify-end">
+              <button
+                onClick={() => setCodeMessage(null)}
+                className="px-4 py-2 text-white rounded-md hover:opacity-90"
+                style={{ backgroundColor: '#c8102e' }}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Cancel Confirmation Modal */}
       {(confirmCancel || cancelMessage) && (
