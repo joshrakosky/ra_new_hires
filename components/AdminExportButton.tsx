@@ -34,16 +34,23 @@ export default function AdminExportButton() {
 
       if (ordersError) throw ordersError
 
-      // Fetch all products to get deco information and current inventory
+      // Fetch all products to get deco information, current inventory, and kit_items
       const { data: productsData, error: productsError } = await supabase
         .from('ra_new_hire_products')
-        .select('id, name, deco, category, inventory, inventory_by_size, customer_item_number')
+        .select('id, name, deco, category, inventory, inventory_by_size, customer_item_number, kit_items')
 
       if (productsError) throw productsError
 
       // Create a map of product_id -> deco for quick lookup
       const productDecoMap = new Map<string, string>()
-      const productInfoMap = new Map<string, { name: string; category: string; inventory: number; inventory_by_size?: Record<string, number>; customer_item_number?: string }>()
+      const productInfoMap = new Map<string, { 
+        name: string; 
+        category: string; 
+        inventory: number; 
+        inventory_by_size?: Record<string, number>; 
+        customer_item_number?: string;
+        kit_items?: Array<{ name: string; thumbnail_url?: string }>;
+      }>()
       productsData?.forEach(product => {
         if (product.deco) {
           productDecoMap.set(product.id, product.deco)
@@ -53,7 +60,8 @@ export default function AdminExportButton() {
           category: product.category,
           inventory: product.inventory,
           inventory_by_size: product.inventory_by_size,
-          customer_item_number: product.customer_item_number || undefined
+          customer_item_number: product.customer_item_number || undefined,
+          kit_items: product.kit_items as Array<{ name: string; thumbnail_url?: string }> | undefined
         })
       })
 
@@ -75,48 +83,115 @@ export default function AdminExportButton() {
         })
       )
 
-      // Sheet 1: Detailed Orders (one row per item)
+      // Sheet 1: Detailed Orders (one row per item, kits expanded into components)
       const detailedData = ordersWithItems.flatMap(order => {
-        return order.items.map((item) => ({
-          'Order Number': order.order_number,
-          'Email': order.email,
-          'Product Name': item.product_name,
-          'Customer Item #': item.customer_item_number || '',
-          'Color': item.color || '',
-          'Size': item.size || '',
-          'Shipping Name': order.shipping_name,
-          'Shipping Address': order.shipping_address,
-          'Shipping City': order.shipping_city,
-          'Shipping State': order.shipping_state,
-          'Shipping ZIP': order.shipping_zip,
-          'Shipping Country': order.shipping_country,
-          'Order Date': new Date(order.created_at).toLocaleDateString()
-        }))
+        return order.items.flatMap((item) => {
+          const productInfo = item.product_id ? productInfoMap.get(item.product_id) : null
+          const isKit = productInfo?.category === 'kit'
+          
+          // Check if this item is already a component (from migration)
+          // Components have product_id pointing to kit, but product_name matches a component name
+          const isAlreadyComponent = isKit && productInfo?.kit_items && 
+            productInfo.kit_items.some(kitItem => kitItem.name === item.product_name) &&
+            !item.customer_item_number && !item.color && !item.size
+          
+          // If this is a kit and NOT already expanded into components, expand it
+          if (isKit && productInfo?.kit_items && productInfo.kit_items.length > 0 && !isAlreadyComponent) {
+            return productInfo.kit_items.map((kitItem) => ({
+              'Order Number': order.order_number,
+              'First Name': order.first_name || '',
+              'Last Name': order.last_name || '',
+              'Email': order.email,
+              'Program': order.program || '',
+              'Product Name': kitItem.name, // Kit component name
+              'Customer Item #': '', // Kit components don't have customer item numbers
+              'Color': '', // Kit components don't have colors
+              'Size': '', // Kit components don't have sizes
+              'Shipping Name': order.shipping_name,
+              'Shipping Address': order.shipping_address,
+              'Shipping City': order.shipping_city,
+              'Shipping State': order.shipping_state,
+              'Shipping ZIP': order.shipping_zip,
+              'Shipping Country': order.shipping_country,
+              'Order Date': new Date(order.created_at).toLocaleDateString()
+            }))
+          } else {
+            // Already expanded component or non-kit item (t-shirt, etc.) - keep as single row
+            return [{
+              'Order Number': order.order_number,
+              'First Name': order.first_name || '',
+              'Last Name': order.last_name || '',
+              'Email': order.email,
+              'Program': order.program || '',
+              'Product Name': item.product_name,
+              'Customer Item #': item.customer_item_number || '',
+              'Color': item.color || '',
+              'Size': item.size || '',
+              'Shipping Name': order.shipping_name,
+              'Shipping Address': order.shipping_address,
+              'Shipping City': order.shipping_city,
+              'Shipping State': order.shipping_state,
+              'Shipping ZIP': order.shipping_zip,
+              'Shipping Country': order.shipping_country,
+              'Order Date': new Date(order.created_at).toLocaleDateString()
+            }]
+          }
+        })
       })
 
-      // Sheet 2: Distribution Summary (grouped by product/color/size)
+      // Sheet 2: Distribution Summary (grouped by product/color/size, kits expanded into components)
       const summaryMap = new Map<string, { quantity: number; deco: string }>()
       
       ordersWithItems.forEach(order => {
         order.items.forEach(item => {
-          // Create a unique key for product/color/size combination
-          const key = [
-            item.product_name,
-            item.customer_item_number || '',
-            item.color || 'N/A',
-            item.size || 'N/A'
-          ].join('|')
+          const productInfo = item.product_id ? productInfoMap.get(item.product_id) : null
+          const isKit = productInfo?.category === 'kit'
           
-          // Get deco from product
-          let deco = item.product_id ? (productDecoMap.get(item.product_id) || '') : ''
+          // Check if this item is already a component (from migration)
+          const isAlreadyComponent = isKit && productInfo?.kit_items && 
+            productInfo.kit_items.some(kitItem => kitItem.name === item.product_name) &&
+            !item.customer_item_number && !item.color && !item.size
           
-          // Add any product-specific deco logic here if needed
-          
-          const existing = summaryMap.get(key)
-          if (existing) {
-            summaryMap.set(key, { quantity: existing.quantity + 1, deco: existing.deco })
+          // If this is a kit and NOT already expanded into components, expand it
+          if (isKit && productInfo?.kit_items && productInfo.kit_items.length > 0 && !isAlreadyComponent) {
+            productInfo.kit_items.forEach((kitItem) => {
+              // Create a unique key for kit component (no color/size for components)
+              const key = [
+                kitItem.name,
+                '', // No customer item number for kit components
+                'N/A', // No color for kit components
+                'N/A' // No size for kit components
+              ].join('|')
+              
+              // Kit components don't have deco
+              const existing = summaryMap.get(key)
+              if (existing) {
+                summaryMap.set(key, { quantity: existing.quantity + 1, deco: '' })
+              } else {
+                summaryMap.set(key, { quantity: 1, deco: '' })
+              }
+            })
           } else {
-            summaryMap.set(key, { quantity: 1, deco })
+            // Already expanded component or non-kit item (t-shirt, etc.) - group normally
+            const key = [
+              item.product_name,
+              item.customer_item_number || '',
+              item.color || 'N/A',
+              item.size || 'N/A'
+            ].join('|')
+            
+            // Get deco from product (only for non-components)
+            let deco = ''
+            if (!isAlreadyComponent) {
+              deco = item.product_id ? (productDecoMap.get(item.product_id) || '') : ''
+            }
+            
+            const existing = summaryMap.get(key)
+            if (existing) {
+              summaryMap.set(key, { quantity: existing.quantity + 1, deco: existing.deco })
+            } else {
+              summaryMap.set(key, { quantity: 1, deco })
+            }
           }
         })
       })

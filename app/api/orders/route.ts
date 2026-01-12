@@ -172,18 +172,13 @@ export async function POST(request: NextRequest) {
       .eq('program', 'RA')
       .single()
 
-    // Get kit product details and its items
+    // Get kit product details and its components
     const { data: kitProduct } = await supabase
       .from('ra_new_hire_products')
-      .select('id, name, customer_item_number')
+      .select('id, name, customer_item_number, kit_items')
       .eq('id', kitId)
       .single()
 
-    // Fetch all products in the kit (kit products have category='kit' and may have related items)
-    // For now, we'll create order items for the t-shirt and the kit itself
-    // If kits have multiple items, they should be stored as separate products with a kit_id reference
-    // or we can fetch kit items separately - for now, treating kit as a single product
-    
     let orderItems: any[] = []
 
     // Add t-shirt order item with size-specific SKU
@@ -206,8 +201,24 @@ export async function POST(request: NextRequest) {
       await updateInventory(tshirtProduct.id, tshirtSize, 1)
     }
 
-    // Add kit order item
-    if (kitProduct) {
+    // Add kit component order items (expand kit into individual components)
+    if (kitProduct && kitProduct.kit_items && Array.isArray(kitProduct.kit_items) && kitProduct.kit_items.length > 0) {
+      // Insert individual components from kit_items
+      kitProduct.kit_items.forEach((kitItem: { name: string; thumbnail_url?: string }) => {
+        orderItems.push({
+          order_id: order.id,
+          product_id: kitProduct.id, // Keep reference to kit product
+          product_name: kitItem.name, // Component name
+          customer_item_number: null, // Components don't have SKUs
+          color: null,
+          size: null
+        })
+      })
+
+      // Update kit inventory (still track kit-level inventory)
+      await updateInventory(kitProduct.id, null, 1)
+    } else if (kitProduct) {
+      // Fallback: if kit has no kit_items, insert kit as single item
       orderItems.push({
         order_id: order.id,
         product_id: kitProduct.id,
