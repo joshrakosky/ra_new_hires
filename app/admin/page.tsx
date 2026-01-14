@@ -26,6 +26,15 @@ export default function AdminPage() {
   const [loadingCodes, setLoadingCodes] = useState(false)
   const [editingCodeId, setEditingCodeId] = useState<string | null>(null)
   const [codeFilter, setCodeFilter] = useState<'all' | 'used' | 'unused'>('all')
+  const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set())
+  const [showProductsPopup, setShowProductsPopup] = useState<{ orderId: string; items: OrderWithItems['items']; program: string } | null>(null)
+  const [showBulkEdit, setShowBulkEdit] = useState(false)
+  const [bulkAction, setBulkAction] = useState<'status' | 'cancel' | null>(null)
+  const [bulkStatus, setBulkStatus] = useState<'Pending' | 'Backorder' | 'Fulfillment' | 'Delivered'>('Pending')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [itemsPerPage, setItemsPerPage] = useState(25)
+  const [sortColumn, setSortColumn] = useState<keyof OrderWithItems>('created_at')
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
 
   useEffect(() => {
     // Check if user is admin (ADMIN code)
@@ -534,6 +543,68 @@ export default function AdminPage() {
     XLSX.writeFile(wb, filename)
   }
 
+  // Sorting logic
+  const sortedOrders = orders.length > 0 ? [...orders].sort((a, b) => {
+    let aValue: any = a[sortColumn]
+    let bValue: any = b[sortColumn]
+    
+    // Handle nested properties
+    if (sortColumn === 'created_at') {
+      aValue = new Date(a.created_at).getTime()
+      bValue = new Date(b.created_at).getTime()
+    } else if (sortColumn === 'first_name' || sortColumn === 'last_name') {
+      // For name sorting, combine first and last name
+      aValue = `${a.first_name} ${a.last_name}`.toLowerCase()
+      bValue = `${b.first_name} ${b.last_name}`.toLowerCase()
+    } else if (typeof aValue === 'string') {
+      aValue = aValue.toLowerCase()
+      bValue = bValue.toLowerCase()
+    }
+    
+    if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1
+    if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1
+    return 0
+  }) : []
+
+  // Pagination calculations
+  const totalPages = Math.ceil(sortedOrders.length / itemsPerPage)
+  const startIndex = (currentPage - 1) * itemsPerPage
+  const endIndex = startIndex + itemsPerPage
+  const paginatedOrders = sortedOrders.slice(startIndex, endIndex)
+  const currentPageSelectedOrders = paginatedOrders.filter(o => selectedOrders.has(o.id))
+  const allCurrentPageSelected = paginatedOrders.length > 0 && currentPageSelectedOrders.length === paginatedOrders.length
+
+  // Handle column header click
+  const handleSort = (column: keyof OrderWithItems) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortColumn(column)
+      setSortDirection('desc')
+    }
+    setCurrentPage(1) // Reset to first page when sorting changes
+  }
+
+  // Sort indicator component
+  const SortIndicator = ({ column }: { column: keyof OrderWithItems }) => {
+    if (sortColumn !== column) {
+      return (
+        <svg className="w-4 h-4 ml-1 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+        </svg>
+      )
+    }
+    return sortDirection === 'asc' ? (
+      <svg className="w-4 h-4 ml-1 text-[#c8102e]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+      </svg>
+    ) : (
+      <svg className="w-4 h-4 ml-1 text-[#c8102e]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+      </svg>
+    )
+  }
+
   if (!authenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center px-4 relative" style={{ backgroundColor: '#00263a' }}>
@@ -547,57 +618,6 @@ export default function AdminPage() {
       <HelpIcon />
       <div className="max-w-7xl mx-auto">
         <div className="bg-white rounded-lg shadow-lg p-8">
-          <div className="mb-4">
-            <button
-              type="button"
-              onClick={() => router.push('/')}
-              className="px-6 py-2 text-white rounded-md hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[#c8102e] focus:ring-offset-2 font-medium"
-              style={{ backgroundColor: '#c8102e' }}
-            >
-              ← Back to Landing Page
-            </button>
-          </div>
-          <div className="flex justify-between items-center mb-6">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900">Republic Airways New Hires - Order Management</h1>
-              <p className="text-gray-600 mt-1">Total Orders: {orders.length}</p>
-            </div>
-            <div className="flex gap-4">
-              <button
-                onClick={() => {
-                  setShowCodeGenerator(!showCodeGenerator)
-                  if (!showCodeGenerator) setShowCodeManager(false)
-                }}
-                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-              >
-                {showCodeGenerator ? 'Hide Code Generator' : 'Generate Codes'}
-              </button>
-              <button
-                onClick={() => {
-                  setShowCodeManager(!showCodeManager)
-                  if (!showCodeManager) setShowCodeGenerator(false)
-                }}
-                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-              >
-                {showCodeManager ? 'Hide Code Manager' : 'Manage Codes'}
-              </button>
-              <button
-                onClick={loadOrders}
-                className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
-              >
-                Refresh
-              </button>
-              <button
-                onClick={exportToExcel}
-                disabled={orders.length === 0}
-                className="px-4 py-2 text-white rounded-md hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ backgroundColor: '#c8102e' }}
-                title="Exports two sheets: Detailed Orders and Distribution Summary"
-              >
-                Export to Excel
-              </button>
-            </div>
-          </div>
 
           {/* Code Generator Section */}
           {showCodeGenerator && (
@@ -799,83 +819,324 @@ export default function AdminPage() {
               <div className="text-lg text-gray-600">No orders yet</div>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <button
+                  type="button"
+                  onClick={() => router.push('/')}
+                  className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 transition-all"
+                  title="Back to Landing Page"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                  </svg>
+                </button>
+                <div className="text-center flex-1">
+                  <h1 className="text-3xl font-bold text-gray-900">Order Management</h1>
+                  <p className="text-gray-600 mt-1">Total Orders: {orders.length}</p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setShowCodeGenerator(!showCodeGenerator)
+                      if (!showCodeGenerator) setShowCodeManager(false)
+                    }}
+                    className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 transition-all"
+                    title={showCodeGenerator ? 'Hide Code Generator' : 'Generate Codes'}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowCodeManager(!showCodeManager)
+                      if (!showCodeManager) setShowCodeGenerator(false)
+                    }}
+                    className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 transition-all"
+                    title={showCodeManager ? 'Hide Code Manager' : 'Manage Codes'}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={loadOrders}
+                    className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 transition-all"
+                    title="Refresh orders"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  </button>
+                  {selectedOrders.size > 0 && (
+                    <button
+                      onClick={() => setShowBulkEdit(true)}
+                      className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 transition-all"
+                      title={`Bulk edit ${selectedOrders.size} selected order(s)`}
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                  )}
+                  <button
+                    onClick={exportToExcel}
+                    disabled={orders.length === 0}
+                    className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#c8102e] disabled:hover:scale-100 transition-all"
+                    title="Exports two sheets: Detailed Orders and Distribution Summary"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-300px)]">
+                <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50 sticky top-0 z-10 shadow-sm">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Order #
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <input
+                        type="checkbox"
+                        checked={allCurrentPageSelected}
+                        onChange={(e) => {
+                          const newSelected = new Set(selectedOrders)
+                          if (e.target.checked) {
+                            paginatedOrders.forEach(order => newSelected.add(order.id))
+                          } else {
+                            paginatedOrders.forEach(order => newSelected.delete(order.id))
+                          }
+                          setSelectedOrders(newSelected)
+                        }}
+                        className="rounded border-gray-300 text-[#c8102e] focus:ring-[#c8102e]"
+                      />
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Code
+                    <th 
+                      className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                      onClick={() => handleSort('created_at')}
+                    >
+                      <div className="flex items-center justify-center">
+                        Date
+                        <SortIndicator column="created_at" />
+                      </div>
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Name
+                    <th 
+                      className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                      onClick={() => handleSort('order_number')}
+                    >
+                      <div className="flex items-center justify-center">
+                        Order #
+                        <SortIndicator column="order_number" />
+                      </div>
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Email
+                    <th 
+                      className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                      onClick={() => handleSort('code')}
+                    >
+                      <div className="flex items-center justify-center">
+                        Code
+                        <SortIndicator column="code" />
+                      </div>
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Program
+                    <th 
+                      className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                      onClick={() => handleSort('status')}
+                    >
+                      <div className="flex items-center justify-center">
+                        Status
+                        <SortIndicator column="status" />
+                      </div>
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Products
+                    <th 
+                      className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                      onClick={() => handleSort('first_name')}
+                    >
+                      <div className="flex items-center justify-center">
+                        Name
+                        <SortIndicator column="first_name" />
+                      </div>
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Date
+                    <th 
+                      className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                      onClick={() => handleSort('email')}
+                    >
+                      <div className="flex items-center justify-center">
+                        Email
+                        <SortIndicator column="email" />
+                      </div>
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Actions
                     </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {orders.map((order) => (
-                    <tr key={order.id}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        {order.order_number}
+                  {paginatedOrders.map((order) => (
+                    <tr key={order.id} className={selectedOrders.has(order.id) ? 'bg-blue-50' : ''}>
+                      <td className="px-4 py-4 whitespace-nowrap text-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedOrders.has(order.id)}
+                          onChange={(e) => {
+                            const newSelected = new Set(selectedOrders)
+                            if (e.target.checked) {
+                              newSelected.add(order.id)
+                            } else {
+                              newSelected.delete(order.id)
+                            }
+                            setSelectedOrders(newSelected)
+                          }}
+                          className="rounded border-gray-300 text-[#c8102e] focus:ring-[#c8102e]"
+                        />
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">
-                        {order.code}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {order.first_name} {order.last_name}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {order.email}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {order.program}
-                      </td>
-                      <td className="px-6 py-4 text-sm text-gray-500">
-                        <div className="space-y-1">
-                          {order.items.map((item, idx) => (
-                            <div key={idx}>
-                              {item.product_name}
-                              {item.customer_item_number && ` [${item.customer_item_number}]`}
-                              {item.color && ` - ${item.color}`}
-                              {item.size && ` (${item.size})`}
-                            </div>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
                         {new Date(order.created_at).toLocaleDateString()}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        <button
-                          onClick={() => setConfirmCancel({ orderId: order.id, orderNumber: order.order_number })}
-                          disabled={cancelingOrderId === order.id}
-                          className="px-3 py-1 text-red-600 hover:text-red-800 hover:bg-red-50 rounded-md disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                          title="Cancel this order"
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 text-center">
+                        {order.order_number}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono text-center">
+                        {order.code}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-center">
+                        <select
+                          value={order.status || 'Pending'}
+                          onChange={async (e) => {
+                            const newStatus = e.target.value as 'Pending' | 'Backorder' | 'Fulfillment' | 'Delivered'
+                            try {
+                              const { error } = await supabase
+                                .from('ra_new_hire_orders')
+                                .update({ status: newStatus })
+                                .eq('id', order.id)
+                              
+                              if (error) throw error
+                              await loadOrders()
+                            } catch (err: any) {
+                              console.error('Failed to update status:', err)
+                              alert(`Failed to update status: ${err.message || 'Unknown error'}`)
+                            }
+                          }}
+                          className="text-sm border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-[#c8102e] focus:border-transparent"
                         >
-                          {cancelingOrderId === order.id ? 'Canceling...' : 'Cancel'}
-                        </button>
+                          <option value="Pending">Pending</option>
+                          <option value="Backorder">Backorder</option>
+                          <option value="Fulfillment">Fulfillment</option>
+                          <option value="Delivered">Delivered</option>
+                        </select>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                        {order.first_name} {order.last_name}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                        {order.email}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-center">
+                        <div className="flex gap-2 justify-center">
+                          <button
+                            onClick={() => setShowProductsPopup({ orderId: order.id, items: order.items, program: order.program })}
+                            className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 transition-all"
+                            title="View products"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={() => setConfirmCancel({ orderId: order.id, orderNumber: order.order_number })}
+                            disabled={cancelingOrderId === order.id}
+                            className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#c8102e] disabled:hover:scale-100 transition-all"
+                            title="Cancel this order"
+                          >
+                            {cancelingOrderId === order.id ? (
+                              <svg className="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                              </svg>
+                            ) : (
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            )}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              </div>
+              
+              {/* Pagination Controls */}
+              <div className="mt-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-700">Show:</span>
+                  <select
+                    value={itemsPerPage}
+                    onChange={(e) => {
+                      setItemsPerPage(Number(e.target.value))
+                      setCurrentPage(1)
+                    }}
+                    className="text-sm border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-[#c8102e] focus:border-transparent"
+                  >
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                  <span className="text-sm text-gray-700">per page</span>
+                </div>
+                <div className="flex-1 text-center">
+                  <span className="text-sm text-gray-700">
+                    Showing {startIndex + 1} to {Math.min(endIndex, sortedOrders.length)} of {sortedOrders.length} orders
+                  </span>
+                </div>
+                <div className="flex gap-1">
+                    <button
+                      onClick={() => setCurrentPage(1)}
+                      disabled={currentPage === 1}
+                      className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                      title="First page"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1}
+                      className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                      title="Previous page"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                      </svg>
+                    </button>
+                    <span className="px-3 py-1 text-sm text-gray-700">
+                      Page {currentPage} of {totalPages}
+                    </span>
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                      disabled={currentPage === totalPages}
+                      className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                      title="Next page"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => setCurrentPage(totalPages)}
+                      disabled={currentPage === totalPages}
+                      className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                      title="Last page"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
             </div>
           )}
         </div>
@@ -918,6 +1179,232 @@ export default function AdminPage() {
                 OK
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Products Popup Modal */}
+      {showProductsPopup && (
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Products Ordered</h2>
+                <p className="text-sm text-gray-600 mt-1">Program: {showProductsPopup.program}</p>
+              </div>
+              <button
+                onClick={() => setShowProductsPopup(null)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="space-y-2">
+              {showProductsPopup.items.map((item, idx) => (
+                <div key={idx} className="p-3 bg-gray-50 rounded-md">
+                  <div className="font-medium text-gray-900">{item.product_name}</div>
+                  {item.customer_item_number && (
+                    <div className="text-sm text-gray-600">SKU: {item.customer_item_number}</div>
+                  )}
+                  {item.color && (
+                    <div className="text-sm text-gray-600">Color: {item.color}</div>
+                  )}
+                  {item.size && (
+                    <div className="text-sm text-gray-600">Size: {item.size}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => setShowProductsPopup(null)}
+                className="px-4 py-2 text-white rounded-md hover:opacity-90"
+                style={{ backgroundColor: '#c8102e' }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Edit Modal */}
+      {showBulkEdit && (
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+            <h2 className="text-xl font-bold text-gray-900 mb-4">
+              Bulk Edit {selectedOrders.size} Order(s)
+            </h2>
+            {!bulkAction ? (
+              <>
+                <p className="text-gray-600 mb-6">What would you like to do with the selected orders?</p>
+                <div className="flex flex-col gap-3">
+                  <button
+                    onClick={() => setBulkAction('status')}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 text-left"
+                  >
+                    Update Status
+                  </button>
+                  <button
+                    onClick={() => setBulkAction('cancel')}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-red-700 hover:bg-red-50 text-left"
+                  >
+                    Cancel Orders
+                  </button>
+                </div>
+                <div className="mt-6 flex justify-end gap-4">
+                  <button
+                    onClick={() => {
+                      setShowBulkEdit(false)
+                      setBulkAction(null)
+                    }}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : bulkAction === 'status' ? (
+              <>
+                <p className="text-gray-600 mb-4">Select new status for {selectedOrders.size} order(s):</p>
+                <select
+                  value={bulkStatus}
+                  onChange={(e) => setBulkStatus(e.target.value as typeof bulkStatus)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#c8102e] focus:border-transparent mb-6"
+                >
+                  <option value="Pending">Pending</option>
+                  <option value="Backorder">Backorder</option>
+                  <option value="Fulfillment">Fulfillment</option>
+                  <option value="Delivered">Delivered</option>
+                </select>
+                <div className="flex justify-end gap-4">
+                  <button
+                    onClick={() => {
+                      setBulkAction(null)
+                      setBulkStatus('Pending')
+                    }}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const orderIds = Array.from(selectedOrders)
+                        if (orderIds.length === 0) {
+                          alert('No orders selected')
+                          return
+                        }
+                        
+                        console.log('Updating orders:', orderIds, 'to status:', bulkStatus)
+                        
+                        const { data, error } = await supabase
+                          .from('ra_new_hire_orders')
+                          .update({ status: bulkStatus })
+                          .in('id', orderIds)
+                          .select()
+                        
+                        if (error) {
+                          console.error('Supabase error:', error)
+                          throw error
+                        }
+                        
+                        console.log('Update result:', data)
+                        
+                        if (data && data.length > 0) {
+                          await loadOrders()
+                          setSelectedOrders(new Set())
+                          setShowBulkEdit(false)
+                          setBulkAction(null)
+                          setBulkStatus('Pending')
+                          alert(`Successfully updated ${data.length} order(s) to ${bulkStatus}`)
+                        } else {
+                          alert('No orders were updated. Please check your selection.')
+                        }
+                      } catch (err: any) {
+                        console.error('Failed to update status:', err)
+                        alert(`Failed to update status: ${err.message || 'Unknown error'}`)
+                      }
+                    }}
+                    className="px-4 py-2 text-white rounded-md hover:opacity-90"
+                    style={{ backgroundColor: '#c8102e' }}
+                  >
+                    Update Status
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-red-600 mb-6">
+                  Are you sure you want to cancel {selectedOrders.size} order(s)? This will restore inventory and cannot be undone.
+                </p>
+                <div className="flex justify-end gap-4">
+                  <button
+                    onClick={() => {
+                      setBulkAction(null)
+                    }}
+                    className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
+                  >
+                    Back
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        // Cancel each selected order
+                        for (const orderId of Array.from(selectedOrders)) {
+                          const order = orders.find(o => o.id === orderId)
+                          if (!order) continue
+                          
+                          // Restore inventory for each item
+                          for (const item of order.items) {
+                            await restoreInventory(item.product_id, item.size || null, 1)
+                          }
+                          
+                          // Mark code as unused
+                          const { data: accessCode } = await supabase
+                            .from('ra_new_hire_access_codes')
+                            .select('id')
+                            .eq('code', order.code)
+                            .single()
+                          
+                          if (accessCode) {
+                            await supabase
+                              .from('ra_new_hire_access_codes')
+                              .update({
+                                used: false,
+                                used_at: null,
+                                order_id: null,
+                                email: null
+                              })
+                              .eq('id', accessCode.id)
+                          }
+                          
+                          // Delete the order
+                          await supabase
+                            .from('ra_new_hire_orders')
+                            .delete()
+                            .eq('id', orderId)
+                        }
+                        
+                        await loadOrders()
+                        setSelectedOrders(new Set())
+                        setShowBulkEdit(false)
+                        setBulkAction(null)
+                      } catch (err: any) {
+                        console.error('Failed to cancel orders:', err)
+                        alert(`Failed to cancel orders: ${err.message || 'Unknown error'}`)
+                      }
+                    }}
+                    className="px-4 py-2 text-white rounded-md hover:opacity-90"
+                    style={{ backgroundColor: '#c8102e' }}
+                  >
+                    Yes, Cancel Orders
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

@@ -31,6 +31,7 @@ export interface Order {
   order_number: string
   program: 'RA' | 'LIFT' // Selected program
   tshirt_size?: string // Selected t-shirt size
+  status: 'Pending' | 'Backorder' | 'Fulfillment' | 'Delivered' // Order status
   shipping_name: string
   shipping_attention?: string
   shipping_address: string
