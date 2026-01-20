@@ -460,6 +460,7 @@ export default function AdminPage() {
         'Last Name': order.last_name,
         'Email': order.email,
         'Program': order.program,
+        'Status': order.status || 'Pending',
         'Product Name': item.product_name,
         'Customer Item #': item.customer_item_number || '',
         'Color': item.color || '',
