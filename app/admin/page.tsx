@@ -35,6 +35,7 @@ export default function AdminPage() {
   const [itemsPerPage, setItemsPerPage] = useState(25)
   const [sortColumn, setSortColumn] = useState<keyof OrderWithItems>('created_at')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'Pending' | 'Backorder' | 'Fulfillment' | 'Delivered'>('all')
 
   useEffect(() => {
     // Check if user is admin (ADMIN code)
@@ -544,8 +545,13 @@ export default function AdminPage() {
     XLSX.writeFile(wb, filename)
   }
 
+  // Filter orders by status
+  const filteredOrders = statusFilter === 'all' 
+    ? orders 
+    : orders.filter(order => (order.status || 'Pending') === statusFilter)
+
   // Sorting logic
-  const sortedOrders = orders.length > 0 ? [...orders].sort((a, b) => {
+  const sortedOrders = filteredOrders.length > 0 ? [...filteredOrders].sort((a, b) => {
     let aValue: any = a[sortColumn]
     let bValue: any = b[sortColumn]
     
@@ -822,19 +828,36 @@ export default function AdminPage() {
           ) : (
             <div>
               <div className="flex justify-between items-center mb-4">
-                <button
-                  type="button"
-                  onClick={() => router.push('/')}
-                  className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 transition-all"
-                  title="Back to Landing Page"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                  </svg>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => router.push('/')}
+                    className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 transition-all"
+                    title="Back to Landing Page"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                    </svg>
+                  </button>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => {
+                      setStatusFilter(e.target.value as typeof statusFilter)
+                      setCurrentPage(1) // Reset to first page when filter changes
+                    }}
+                    className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-[#c8102e] focus:border-transparent bg-white"
+                    title="Filter by status"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Backorder">Backorder</option>
+                    <option value="Fulfillment">Fulfillment</option>
+                    <option value="Delivered">Delivered</option>
+                  </select>
+                </div>
                 <div className="text-center flex-1">
                   <h1 className="text-3xl font-bold text-gray-900">Order Management</h1>
-                  <p className="text-gray-600 mt-1">Total Orders: {orders.length}</p>
+                  <p className="text-gray-600 mt-1">Total Orders: {sortedOrders.length} {statusFilter !== 'all' && `(${orders.length} total)`}</p>
                 </div>
                 <div className="flex gap-2">
                   <button
