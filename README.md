@@ -90,7 +90,7 @@ See `supabase-schema-ra-new-hires.sql` for the complete schema.
 All orders ship to:
 - Republic Airways Training Center
 - Attn: HR Shared Services
-- 1 Brickyard Ln, CARMEL, IN 46032
+- 2 Brickyard Ln, CARMEL, IN 46032
 
 This address is pre-filled and not editable by users.
 

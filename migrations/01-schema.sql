@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS ra_new_hire_orders (
   tshirt_size TEXT, -- Selected t-shirt size
   shipping_name TEXT NOT NULL DEFAULT 'Republic Airways Training Center',
   shipping_attention TEXT NOT NULL DEFAULT 'HR Shared Services',
-  shipping_address TEXT NOT NULL DEFAULT '1 Brickyard Ln',
+  shipping_address TEXT NOT NULL DEFAULT '2 Brickyard Ln',
   shipping_address2 TEXT,
   shipping_city TEXT NOT NULL DEFAULT 'CARMEL',
   shipping_state TEXT NOT NULL DEFAULT 'IN',

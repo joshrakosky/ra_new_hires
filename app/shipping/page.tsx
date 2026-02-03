@@ -21,7 +21,7 @@ export default function ShippingPage() {
   const defaultShipping = {
     name: 'Republic Airways Training Center',
     attention: 'HR Shared Services',
-    address: '1 Brickyard Ln',
+    address: '2 Brickyard Ln',
     address2: '',
     city: 'CARMEL',
     state: 'IN',

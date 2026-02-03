@@ -67,7 +67,7 @@ Orders are numbered as: `ra-new-hire-001`, `ra-new-hire-002`, etc.
 All orders ship to:
 - **Name**: Republic Airways Training Center
 - **Attention**: HR Shared Services
-- **Address**: 1 Brickyard Ln
+- **Address**: 2 Brickyard Ln
 - **City**: CARMEL
 - **State**: IN
 - **ZIP**: 46032
