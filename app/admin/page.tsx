@@ -26,8 +26,20 @@ export default function AdminPage() {
   const [loadingCodes, setLoadingCodes] = useState(false)
   const [editingCodeId, setEditingCodeId] = useState<string | null>(null)
   const [codeFilter, setCodeFilter] = useState<'all' | 'used' | 'unused'>('all')
+  const [codeManagerPage, setCodeManagerPage] = useState(1)
+  const [codeManagerItemsPerPage, setCodeManagerItemsPerPage] = useState(25)
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set())
-  const [showProductsPopup, setShowProductsPopup] = useState<{ orderId: string; items: OrderWithItems['items']; program: string } | null>(null)
+  const [showProductsPopup, setShowProductsPopup] = useState<{
+    orderId: string
+    items: OrderWithItems['items']
+    program: string
+    code?: string
+    email?: string
+    first_name?: string
+    last_name?: string
+    class_date?: string
+    class_type?: string
+  } | null>(null)
   const [showBulkEdit, setShowBulkEdit] = useState(false)
   const [bulkAction, setBulkAction] = useState<'status' | 'cancel' | null>(null)
   const [bulkStatus, setBulkStatus] = useState<'Pending' | 'Backorder' | 'Fulfillment' | 'Delivered'>('Pending')
@@ -36,6 +48,26 @@ export default function AdminPage() {
   const [sortColumn, setSortColumn] = useState<keyof OrderWithItems>('created_at')
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc')
   const [statusFilter, setStatusFilter] = useState<'all' | 'Pending' | 'Backorder' | 'Fulfillment' | 'Delivered'>('all')
+  const [searchQuery, setSearchQuery] = useState('')
+  // Inventory modal: t-shirt rows by size + one row per kit component (from kit_items), not kit-level
+  const [showInventoryModal, setShowInventoryModal] = useState(false)
+  type InventoryRow = {
+    productId: string | null
+    componentName: string | null
+    name: string
+    size: string | null
+    sku: string | null
+    inventory: number
+    reorder_point: number | null
+    category: 'tshirt' | 'component'
+  }
+  const [inventoryProducts, setInventoryProducts] = useState<InventoryRow[]>([])
+  const [loadingInventory, setLoadingInventory] = useState(false)
+  const [editingInventoryCell, setEditingInventoryCell] = useState<{ productId: string | null; componentName: string | null; field: 'inventory' | 'reorder_point'; size: string | null } | null>(null)
+  const [inventoryEditDraft, setInventoryEditDraft] = useState<string>('')
+  const [savingInventoryCell, setSavingInventoryCell] = useState<string | null>(null)
+  const [inventorySearchQuery, setInventorySearchQuery] = useState('')
+  const [inventorySort, setInventorySort] = useState<{ col: 'name' | 'sku' | 'inventory' | 'reorder_point'; dir: 'asc' | 'desc' }>({ col: 'name', dir: 'asc' })
 
   useEffect(() => {
     // Check if user is admin (ADMIN code)
@@ -59,6 +91,173 @@ export default function AdminPage() {
       loadAccessCodes()
     }
   }, [showCodeManager])
+
+  const loadInventoryProducts = async () => {
+    try {
+      setLoadingInventory(true)
+      const { data: productsData, error: productsError } = await supabase
+        .from('ra_new_hire_products')
+        .select('id, name, customer_item_number, inventory, inventory_by_size, reorder_point, category, kit_items')
+        .in('category', ['tshirt', 'kit'])
+        .order('name')
+      if (productsError) throw productsError
+
+      const componentNames = new Set<string>()
+      for (const p of productsData ?? []) {
+        if (p.category === 'kit' && p.kit_items && Array.isArray(p.kit_items)) {
+          for (const item of p.kit_items as Array<{ name: string }>) {
+            if (item?.name) componentNames.add(item.name)
+          }
+        }
+      }
+
+      const { data: componentData, error: componentError } = await supabase
+        .from('ra_new_hire_component_inventory')
+        .select('component_name, inventory, reorder_point')
+      if (componentError) throw componentError
+      const componentMap = new Map<string, { inventory: number; reorder_point: number | null }>()
+      for (const row of componentData ?? []) {
+        componentMap.set(row.component_name, { inventory: row.inventory ?? 0, reorder_point: row.reorder_point ?? null })
+      }
+
+      const rows: InventoryRow[] = []
+      for (const p of productsData ?? []) {
+        if (p.category === 'tshirt' && p.inventory_by_size && typeof p.inventory_by_size === 'object') {
+          const bySize = p.inventory_by_size as Record<string, number>
+          const sizes = Object.keys(bySize).sort()
+          for (const size of sizes) {
+            rows.push({
+              productId: p.id,
+              componentName: null,
+              name: p.name,
+              size,
+              sku: p.customer_item_number ? `${p.customer_item_number}-${size}` : null,
+              inventory: bySize[size] ?? 0,
+              reorder_point: p.reorder_point ?? null,
+              category: 'tshirt'
+            })
+          }
+        }
+      }
+      for (const name of Array.from(componentNames).sort()) {
+        const data = componentMap.get(name) ?? { inventory: 0, reorder_point: null }
+        rows.push({
+          productId: null,
+          componentName: name,
+          name,
+          size: null,
+          sku: null,
+          inventory: data.inventory,
+          reorder_point: data.reorder_point,
+          category: 'component'
+        })
+      }
+      setInventoryProducts(rows)
+    } catch (err: any) {
+      console.error('Failed to load inventory:', err)
+      setInventoryProducts([])
+    } finally {
+      setLoadingInventory(false)
+    }
+  }
+
+  useEffect(() => {
+    if (showInventoryModal) {
+      loadInventoryProducts()
+    }
+  }, [showInventoryModal])
+
+  const saveInventoryCell = async (row: InventoryRow, field: 'inventory' | 'reorder_point', value: string) => {
+    const match =
+      editingInventoryCell &&
+      editingInventoryCell.field === field &&
+      (row.componentName
+        ? editingInventoryCell.componentName === row.componentName
+        : editingInventoryCell.productId === row.productId && editingInventoryCell.size === row.size)
+    if (!match) return
+    const trimmed = value.trim()
+    const isNull = trimmed === '' || trimmed === '–'
+    const num = isNull ? null : parseInt(trimmed, 10)
+    if (!isNull && (Number.isNaN(num) || num < -999999)) {
+      setEditingInventoryCell(null)
+      setInventoryEditDraft('')
+      return
+    }
+    const cellKey = row.componentName
+      ? `component-${row.componentName}-${field}`
+      : `${row.productId}-${row.size}-${field}`
+    setSavingInventoryCell(cellKey)
+    try {
+      if (row.componentName) {
+        const { error } = await supabase.from('ra_new_hire_component_inventory').upsert(
+          {
+            component_name: row.componentName,
+            inventory: field === 'inventory' ? (num ?? 0) : row.inventory,
+            reorder_point: field === 'reorder_point' ? (isNull ? null : num) : row.reorder_point,
+            updated_at: new Date().toISOString()
+          },
+          { onConflict: 'component_name' }
+        )
+        if (error) throw error
+        if (field === 'inventory') {
+          setInventoryProducts(prev =>
+            prev.map(r => (r.componentName === row.componentName ? { ...r, inventory: num ?? 0 } : r))
+          )
+        } else {
+          setInventoryProducts(prev =>
+            prev.map(r => (r.componentName === row.componentName ? { ...r, reorder_point: isNull ? null : num! } : r))
+          )
+        }
+      } else if (row.productId && row.category === 'tshirt') {
+        if (field === 'reorder_point') {
+          const { error } = await supabase
+            .from('ra_new_hire_products')
+            .update({ reorder_point: isNull ? null : num })
+            .eq('id', row.productId)
+          if (error) throw error
+          setInventoryProducts(prev =>
+            prev.map(r => (r.productId === row.productId ? { ...r, reorder_point: isNull ? null : num! } : r))
+          )
+        } else {
+          const { data: product, error: fetchErr } = await supabase
+            .from('ra_new_hire_products')
+            .select('inventory_by_size')
+            .eq('id', row.productId)
+            .single()
+          if (fetchErr) throw fetchErr
+          const bySize = (product?.inventory_by_size as Record<string, number>) ?? {}
+          const newBySize = { ...bySize, [row.size!]: num ?? 0 }
+          const newInventory = Object.values(newBySize).reduce((a, b) => a + b, 0)
+          const { error } = await supabase
+            .from('ra_new_hire_products')
+            .update({ inventory_by_size: newBySize, inventory: newInventory })
+            .eq('id', row.productId)
+          if (error) throw error
+          setInventoryProducts(prev =>
+            prev.map(r => (r.productId === row.productId && r.size === row.size ? { ...r, inventory: num ?? 0 } : r))
+          )
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to update inventory:', err)
+    } finally {
+      setSavingInventoryCell(null)
+      setEditingInventoryCell(null)
+      setInventoryEditDraft('')
+    }
+  }
+
+  // Lock body scroll when Code Generator, Code Manager, or Inventory modal is open
+  useEffect(() => {
+    if (showCodeGenerator || showCodeManager || showInventoryModal) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = 'unset'
+    }
+    return () => {
+      document.body.style.overflow = 'unset'
+    }
+  }, [showCodeGenerator, showCodeManager, showInventoryModal])
 
   const loadOrders = async () => {
     try {
@@ -98,10 +297,10 @@ export default function AdminPage() {
     }
   }
 
-  // Restore inventory for a product (reverse the order)
+  // Restore inventory for a product (add quantity back). Used when cancelling orders so stock
+  // stays accurate for t-shirts (inventory + inventory_by_size) and kits (inventory).
   const restoreInventory = async (productId: string, size: string | null, quantity: number = 1): Promise<void> => {
     try {
-      // Get current product data
       const { data: product, error: fetchError } = await supabase
         .from('ra_new_hire_products')
         .select('inventory, inventory_by_size, category')
@@ -110,10 +309,7 @@ export default function AdminPage() {
 
       if (fetchError) throw fetchError
 
-      // Restore inventory (add back the quantity)
       const newInventory = (product.inventory || 0) + quantity
-
-      // Update size-specific inventory if size is provided
       let newInventoryBySize = product.inventory_by_size || {}
       if (size && newInventoryBySize[size] !== undefined) {
         newInventoryBySize = {
@@ -122,18 +318,13 @@ export default function AdminPage() {
         }
       }
 
-      // Prepare update object - only include inventory_by_size if it was modified
       const updateData: { inventory: number; inventory_by_size?: Record<string, number> } = {
         inventory: newInventory
       }
-      
-      // Only update inventory_by_size if size was provided (for t-shirts)
-      // For kits (size is null), preserve the existing inventory_by_size value
       if (size && newInventoryBySize[size] !== undefined) {
         updateData.inventory_by_size = newInventoryBySize
       }
 
-      // Update product inventory
       const { error: updateError } = await supabase
         .from('ra_new_hire_products')
         .update(updateData)
@@ -146,22 +337,34 @@ export default function AdminPage() {
     }
   }
 
+  // Build list of (product_id, size) to restore: one unit per distinct product/size.
+  // Kit orders have many order items (one per component) with the same product_id; we restore
+  // the kit once, not once per component, so inventory stays correct.
+  const getRestoreListFromOrderItems = (items: OrderWithItems['items']): { productId: string; size: string | null }[] => {
+    const key = (productId: string, size: string | null) => `${productId}|${size ?? ''}`
+    const seen = new Set<string>()
+    const list: { productId: string; size: string | null }[] = []
+    for (const item of items) {
+      const k = key(item.product_id, item.size || null)
+      if (seen.has(k)) continue
+      seen.add(k)
+      list.push({ productId: item.product_id, size: item.size || null })
+    }
+    return list
+  }
+
   const handleCancelOrder = async (orderId: string) => {
     try {
       setCancelingOrderId(orderId)
-      
-      // Find the order to get its items
       const order = orders.find(o => o.id === orderId)
       if (!order) {
         throw new Error('Order not found')
       }
 
-      console.log('Canceling order:', order.order_number, 'with', order.items.length, 'items')
-
-      // Restore inventory for each item in the order
-      for (const item of order.items) {
-        console.log('Restoring inventory for item:', item.product_name, 'product_id:', item.product_id)
-        await restoreInventory(item.product_id, item.size || null, 1)
+      // Restore inventory first (one unit per product/size so kits aren’t over-restored)
+      const toRestore = getRestoreListFromOrderItems(order.items)
+      for (const { productId, size } of toRestore) {
+        await restoreInventory(productId, size, 1)
       }
 
       // Mark code as unused in access codes table if it exists
@@ -183,8 +386,7 @@ export default function AdminPage() {
           .eq('id', accessCode.id)
       }
 
-      // Delete the order (cascade will delete order items)
-      // This also frees up the entry code to be used again (removes UNIQUE constraint)
+      // Delete the order (cascade deletes order items). Inventory was already restored above.
       const { data: deletedData, error: deleteError } = await supabase
         .from('ra_new_hire_orders')
         .delete()
@@ -460,6 +662,8 @@ export default function AdminPage() {
         'First Name': order.first_name,
         'Last Name': order.last_name,
         'Email': order.email,
+        'Class Date': order.class_date ? new Date(order.class_date).toLocaleDateString() : '',
+        'Class Type': order.class_type || '',
         'Program': order.program,
         'Status': order.status || 'Pending',
         'Product Name': item.product_name,
@@ -545,10 +749,29 @@ export default function AdminPage() {
     XLSX.writeFile(wb, filename)
   }
 
-  // Filter orders by status
-  const filteredOrders = statusFilter === 'all' 
-    ? orders 
+  // Filter orders by status, then by search (order number, code, name, email, class type)
+  const filteredByStatus = statusFilter === 'all'
+    ? orders
     : orders.filter(order => (order.status || 'Pending') === statusFilter)
+  const filteredOrders = !searchQuery.trim()
+    ? filteredByStatus
+    : filteredByStatus.filter(order => {
+        const q = searchQuery.trim().toLowerCase()
+        const name = `${order.first_name || ''} ${order.last_name || ''}`.toLowerCase()
+        const email = (order.email || '').toLowerCase()
+        const orderNumber = (order.order_number || '').toLowerCase()
+        const code = (order.code || '').toLowerCase()
+        const classType = (order.class_type || '').toLowerCase()
+        const classDate = order.class_date ? new Date(order.class_date).toLocaleDateString().toLowerCase() : ''
+        return (
+          name.includes(q) ||
+          email.includes(q) ||
+          orderNumber.includes(q) ||
+          code.includes(q) ||
+          classType.includes(q) ||
+          classDate.includes(q)
+        )
+      })
 
   // Sorting logic
   const sortedOrders = filteredOrders.length > 0 ? [...filteredOrders].sort((a, b) => {
@@ -563,6 +786,12 @@ export default function AdminPage() {
       // For name sorting, combine first and last name
       aValue = `${a.first_name} ${a.last_name}`.toLowerCase()
       bValue = `${b.first_name} ${b.last_name}`.toLowerCase()
+    } else if (sortColumn === 'class_date') {
+      aValue = a.class_date ? new Date(a.class_date).getTime() : 0
+      bValue = b.class_date ? new Date(b.class_date).getTime() : 0
+    } else if (sortColumn === 'class_type') {
+      aValue = (a.class_type || '').toLowerCase()
+      bValue = (b.class_type || '').toLowerCase()
     } else if (typeof aValue === 'string') {
       aValue = aValue.toLowerCase()
       bValue = bValue.toLowerCase()
@@ -580,6 +809,17 @@ export default function AdminPage() {
   const paginatedOrders = sortedOrders.slice(startIndex, endIndex)
   const currentPageSelectedOrders = paginatedOrders.filter(o => selectedOrders.has(o.id))
   const allCurrentPageSelected = paginatedOrders.length > 0 && currentPageSelectedOrders.length === paginatedOrders.length
+
+  // Code Manager: filtered list and pagination
+  const filteredAccessCodes = accessCodes.filter(code => {
+    if (codeFilter === 'used') return code.used
+    if (codeFilter === 'unused') return !code.used
+    return true
+  })
+  const codeManagerTotalPages = Math.max(1, Math.ceil(filteredAccessCodes.length / codeManagerItemsPerPage))
+  const codeManagerStartIndex = (codeManagerPage - 1) * codeManagerItemsPerPage
+  const codeManagerEndIndex = codeManagerStartIndex + codeManagerItemsPerPage
+  const paginatedAccessCodes = filteredAccessCodes.slice(codeManagerStartIndex, codeManagerEndIndex)
 
   // Handle column header click
   const handleSort = (column: keyof OrderWithItems) => {
@@ -626,197 +866,6 @@ export default function AdminPage() {
       <div className="max-w-7xl mx-auto">
         <div className="bg-white rounded-lg shadow-lg p-8">
 
-          {/* Code Generator Section */}
-          {showCodeGenerator && (
-            <div className="mb-6 p-6 bg-gray-50 rounded-lg border border-gray-200">
-              <h2 className="text-xl font-bold text-gray-900 mb-4">Access Code Generator</h2>
-              
-              <div className="flex gap-4 items-end mb-4">
-                <div className="flex-1">
-                  <label htmlFor="codeQuantity" className="block text-sm font-medium text-gray-700 mb-2">
-                    Number of Codes to Generate
-                  </label>
-                  <input
-                    type="number"
-                    id="codeQuantity"
-                    min="1"
-                    max="1000"
-                    value={codeQuantity}
-                    onChange={(e) => setCodeQuantity(parseInt(e.target.value) || 10)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#c8102e] focus:border-transparent"
-                  />
-                </div>
-                <button
-                  onClick={handleGenerateCodes}
-                  disabled={generatingCodes}
-                  className="px-6 py-2 text-white rounded-md hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: '#c8102e' }}
-                >
-                  {generatingCodes ? 'Generating...' : 'Generate Codes'}
-                </button>
-              </div>
-
-              {generatedCodes.length > 0 && (
-                <div className="mt-4">
-                  <div className="flex justify-between items-center mb-2">
-                    <p className="text-sm font-medium text-gray-700">
-                      Generated {generatedCodes.length} code(s)
-                    </p>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleSaveCodes}
-                        disabled={savingCodes || generatedCodes.length === 0}
-                        className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                      >
-                        {savingCodes ? 'Saving...' : 'Save to Database'}
-                      </button>
-                      <button
-                        onClick={handleExportCodes}
-                        disabled={generatedCodes.length === 0}
-                        className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                      >
-                        Export to Excel
-                      </button>
-                    </div>
-                  </div>
-                  <div className="bg-white rounded-md border border-gray-300 p-4 max-h-60 overflow-y-auto">
-                    <div className="grid grid-cols-6 gap-2 font-mono text-sm">
-                      {generatedCodes.map((code, index) => (
-                        <div key={index} className="px-2 py-1 bg-gray-50 rounded text-center text-gray-900">
-                          {code}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Code Manager Section */}
-          {showCodeManager && (
-            <div className="mb-6 p-6 bg-gray-50 rounded-lg border border-gray-200">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-xl font-bold text-gray-900">Access Code Manager</h2>
-                <div className="flex gap-2">
-                  <select
-                    value={codeFilter}
-                    onChange={(e) => setCodeFilter(e.target.value as 'all' | 'used' | 'unused')}
-                    className="px-3 py-1 border border-gray-300 rounded-md text-sm"
-                  >
-                    <option value="all">All Codes</option>
-                    <option value="used">Used Only</option>
-                    <option value="unused">Unused Only</option>
-                  </select>
-                  <button
-                    onClick={loadAccessCodes}
-                    disabled={loadingCodes}
-                    className="px-4 py-1 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 text-sm disabled:opacity-50"
-                  >
-                    {loadingCodes ? 'Loading...' : 'Refresh'}
-                  </button>
-                </div>
-              </div>
-
-              {loadingCodes ? (
-                <div className="text-center py-8 text-gray-600">Loading codes...</div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200 bg-white rounded-md">
-                    <thead className="bg-gray-50">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Code
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Status
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Email
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Created
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Used At
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {accessCodes
-                        .filter(code => {
-                          if (codeFilter === 'used') return code.used
-                          if (codeFilter === 'unused') return !code.used
-                          return true
-                        })
-                        .map((code) => (
-                          <tr key={code.id}>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm font-mono text-gray-900">
-                              {code.code}
-                            </td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm">
-                              {code.used ? (
-                                <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium">
-                                  Used
-                                </span>
-                              ) : (
-                                <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
-                                  Available
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                              {code.email || '-'}
-                            </td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                              {new Date(code.created_at).toLocaleDateString()}
-                            </td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                              {code.used_at ? new Date(code.used_at).toLocaleDateString() : '-'}
-                            </td>
-                            <td className="px-4 py-3 whitespace-nowrap text-sm">
-                              <div className="flex gap-2">
-                                <button
-                                  onClick={() => handleToggleCodeStatus(code.id, code.used)}
-                                  disabled={editingCodeId === code.id}
-                                  className={`px-2 py-1 text-xs rounded-md ${
-                                    code.used
-                                      ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                                      : 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
-                                  } disabled:opacity-50 disabled:cursor-not-allowed`}
-                                  title={code.used ? 'Mark as unused' : 'Mark as used'}
-                                >
-                                  {editingCodeId === code.id ? 'Updating...' : code.used ? 'Mark Unused' : 'Mark Used'}
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteCode(code.id, code.code)}
-                                  disabled={editingCodeId === code.id}
-                                  className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded-md hover:bg-red-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                                  title="Delete code"
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                  {accessCodes.filter(code => {
-                    if (codeFilter === 'used') return code.used
-                    if (codeFilter === 'unused') return !code.used
-                    return true
-                  }).length === 0 && (
-                    <div className="text-center py-8 text-gray-600">No codes found.</div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
           {loading ? (
             <div className="text-center py-12">
               <div className="text-lg text-gray-600">Loading orders...</div>
@@ -839,6 +888,17 @@ export default function AdminPage() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                     </svg>
                   </button>
+                  <input
+                    type="search"
+                    placeholder="Search orders..."
+                    value={searchQuery}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value)
+                      setCurrentPage(1)
+                    }}
+                    className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-[#c8102e] focus:border-transparent bg-white min-w-[180px]"
+                    title="Search by order #, code, name, email, class type, or class date"
+                  />
                   <select
                     value={statusFilter}
                     onChange={(e) => {
@@ -892,6 +952,23 @@ export default function AdminPage() {
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowInventoryModal(!showInventoryModal)
+                      if (!showInventoryModal) {
+                        setShowCodeGenerator(false)
+                        setShowCodeManager(false)
+                      }
+                    }}
+                    className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 transition-all"
+                    title="Inventory"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+                      <path d="M12 2L2 7v10l10 5 10-5V7L12 2z" />
+                      <path d="M2 7l10 5 10-5" />
+                      <path d="M12 22V12" />
                     </svg>
                   </button>
                   {selectedOrders.size > 0 && (
@@ -957,15 +1034,6 @@ export default function AdminPage() {
                     </th>
                     <th 
                       className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
-                      onClick={() => handleSort('code')}
-                    >
-                      <div className="flex items-center justify-center">
-                        Code
-                        <SortIndicator column="code" />
-                      </div>
-                    </th>
-                    <th 
-                      className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
                       onClick={() => handleSort('status')}
                     >
                       <div className="flex items-center justify-center">
@@ -984,11 +1052,20 @@ export default function AdminPage() {
                     </th>
                     <th 
                       className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
-                      onClick={() => handleSort('email')}
+                      onClick={() => handleSort('class_type')}
                     >
                       <div className="flex items-center justify-center">
-                        Email
-                        <SortIndicator column="email" />
+                        Class Type
+                        <SortIndicator column="class_type" />
+                      </div>
+                    </th>
+                    <th 
+                      className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                      onClick={() => handleSort('class_date')}
+                    >
+                      <div className="flex items-center justify-center">
+                        Class Date
+                        <SortIndicator column="class_date" />
                       </div>
                     </th>
                     <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -1021,9 +1098,6 @@ export default function AdminPage() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 text-center">
                         {order.order_number}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono text-center">
-                        {order.code}
-                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-center">
                         <select
                           value={order.status || 'Pending'}
@@ -1054,12 +1128,25 @@ export default function AdminPage() {
                         {order.first_name} {order.last_name}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
-                        {order.email}
+                        {order.class_type || '–'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                        {order.class_date ? new Date(order.class_date).toLocaleDateString() : '–'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-center">
                         <div className="flex gap-2 justify-center">
                           <button
-                            onClick={() => setShowProductsPopup({ orderId: order.id, items: order.items, program: order.program })}
+                            onClick={() => setShowProductsPopup({
+                              orderId: order.id,
+                              items: order.items,
+                              program: order.program,
+                              code: order.code,
+                              email: order.email,
+                              first_name: order.first_name,
+                              last_name: order.last_name,
+                              class_date: order.class_date,
+                              class_type: order.class_type
+                            })}
                             className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 transition-all"
                             title="View products"
                           >
@@ -1166,6 +1253,548 @@ export default function AdminPage() {
         </div>
       </div>
 
+      {/* Code Generator Modal */}
+      {showCodeGenerator && (
+        <div
+          className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50"
+          onClick={() => setShowCodeGenerator(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl p-6 max-w-2xl w-full mx-4 max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center border-b pb-4 mb-4">
+              <h2 className="text-xl font-bold text-gray-900">Access Code Generator</h2>
+              <button
+                onClick={() => setShowCodeGenerator(false)}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+                aria-label="Close"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1 min-h-0">
+              <div className="flex gap-4 items-end mb-4">
+                <div className="flex-1">
+                  <label htmlFor="codeQuantity" className="block text-sm font-medium text-gray-700 mb-2">
+                    Number of Codes to Generate
+                  </label>
+                  <input
+                    type="number"
+                    id="codeQuantity"
+                    min="1"
+                    max="1000"
+                    value={codeQuantity}
+                    onChange={(e) => setCodeQuantity(parseInt(e.target.value) || 10)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#c8102e] focus:border-transparent"
+                  />
+                </div>
+                <button
+                  onClick={handleGenerateCodes}
+                  disabled={generatingCodes}
+                  className="px-6 py-2 text-white rounded-md hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ backgroundColor: '#c8102e' }}
+                >
+                  {generatingCodes ? 'Generating...' : 'Generate Codes'}
+                </button>
+              </div>
+
+              {generatedCodes.length > 0 && (
+                <div className="mt-4">
+                  <div className="flex justify-between items-center mb-2">
+                    <p className="text-sm font-medium text-gray-700">
+                      Generated {generatedCodes.length} code(s)
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleSaveCodes}
+                        disabled={savingCodes || generatedCodes.length === 0}
+                        className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                      >
+                        {savingCodes ? 'Saving...' : 'Save to Database'}
+                      </button>
+                      <button
+                        onClick={handleExportCodes}
+                        disabled={generatedCodes.length === 0}
+                        className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                      >
+                        Export to Excel
+                      </button>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto overflow-y-auto max-h-[40vh] border border-gray-300 rounded-md">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50 sticky top-0 z-10 shadow-sm">
+                        <tr>
+                          <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            #
+                          </th>
+                          <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Code
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {generatedCodes.map((code, index) => (
+                          <tr key={index}>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                              {index + 1}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900 text-center">
+                              {code}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Code Manager Modal */}
+      {showCodeManager && (
+        <div
+          className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50"
+          onClick={() => setShowCodeManager(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl p-6 max-w-5xl w-full mx-4 max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center border-b pb-4 mb-4 flex-shrink-0">
+              <h2 className="text-xl font-bold text-gray-900">Access Code Manager</h2>
+              <div className="flex items-center gap-2">
+                <select
+                  value={codeFilter}
+                  onChange={(e) => {
+                    setCodeFilter(e.target.value as 'all' | 'used' | 'unused')
+                    setCodeManagerPage(1)
+                  }}
+                  className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-[#c8102e] focus:border-transparent bg-white"
+                >
+                  <option value="all">All Codes</option>
+                  <option value="used">Used Only</option>
+                  <option value="unused">Unused Only</option>
+                </select>
+                <button
+                  onClick={loadAccessCodes}
+                  disabled={loadingCodes}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 text-sm disabled:opacity-50"
+                >
+                  {loadingCodes ? 'Loading...' : 'Refresh'}
+                </button>
+                <button
+                  onClick={() => setShowCodeManager(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+                  aria-label="Close"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 flex flex-col">
+              {loadingCodes ? (
+                <div className="text-center py-8 text-gray-600">Loading codes...</div>
+              ) : (
+                <>
+                  <div className="overflow-x-auto overflow-y-auto flex-1 min-h-0">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50 sticky top-0 z-10 shadow-sm">
+                        <tr>
+                          <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Code
+                          </th>
+                          <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Status
+                          </th>
+                          <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Email
+                          </th>
+                          <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Created
+                          </th>
+                          <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Used At
+                          </th>
+                          <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Actions
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {filteredAccessCodes.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="px-6 py-8 text-center text-sm text-gray-600">
+                              No codes found.
+                            </td>
+                          </tr>
+                        ) : (
+                          paginatedAccessCodes.map((code) => (
+                            <tr key={code.id}>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900 text-center">
+                                {code.code}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-center">
+                                {code.used ? (
+                                  <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium">
+                                    Used
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
+                                    Available
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                                {code.email || '-'}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                                {new Date(code.created_at).toLocaleDateString()}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                                {code.used_at ? new Date(code.used_at).toLocaleDateString() : '-'}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-center">
+                                <div className="flex gap-2 justify-center">
+                                  <button
+                                    onClick={() => handleToggleCodeStatus(code.id, code.used)}
+                                    disabled={editingCodeId === code.id}
+                                    className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#c8102e] disabled:hover:scale-100 transition-all"
+                                    title={code.used ? 'Mark as unused' : 'Mark as used'}
+                                  >
+                                    {editingCodeId === code.id ? (
+                                      <svg className="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                      </svg>
+                                    ) : code.used ? (
+                                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="Mark unused">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+                                      </svg>
+                                    ) : (
+                                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" title="Mark used">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                      </svg>
+                                    )}
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteCode(code.id, code.code)}
+                                    disabled={editingCodeId === code.id}
+                                    className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#c8102e] disabled:hover:scale-100 transition-all"
+                                    title="Delete code"
+                                  >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  {/* Code Manager pagination */}
+                  {filteredAccessCodes.length > 0 && (
+                    <div className="mt-4 flex items-center justify-between flex-shrink-0 border-t pt-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-gray-700">Show:</span>
+                        <select
+                          value={codeManagerItemsPerPage}
+                          onChange={(e) => {
+                            setCodeManagerItemsPerPage(Number(e.target.value))
+                            setCodeManagerPage(1)
+                          }}
+                          className="text-sm border border-gray-300 rounded-md px-2 py-1 focus:ring-2 focus:ring-[#c8102e] focus:border-transparent"
+                        >
+                          <option value={25}>25</option>
+                          <option value={50}>50</option>
+                          <option value={100}>100</option>
+                        </select>
+                        <span className="text-sm text-gray-700">per page</span>
+                      </div>
+                      <div className="flex-1 text-center">
+                        <span className="text-sm text-gray-700">
+                          Showing {codeManagerStartIndex + 1} to {Math.min(codeManagerEndIndex, filteredAccessCodes.length)} of {filteredAccessCodes.length} codes
+                        </span>
+                      </div>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => setCodeManagerPage(1)}
+                          disabled={codeManagerPage === 1}
+                          className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                          title="First page"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => setCodeManagerPage(prev => Math.max(1, prev - 1))}
+                          disabled={codeManagerPage === 1}
+                          className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                          title="Previous page"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                          </svg>
+                        </button>
+                        <span className="px-3 py-1 text-sm text-gray-700">
+                          Page {codeManagerPage} of {codeManagerTotalPages}
+                        </span>
+                        <button
+                          onClick={() => setCodeManagerPage(prev => Math.min(codeManagerTotalPages, prev + 1))}
+                          disabled={codeManagerPage === codeManagerTotalPages}
+                          className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                          title="Next page"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => setCodeManagerPage(codeManagerTotalPages)}
+                          disabled={codeManagerPage === codeManagerTotalPages}
+                          className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                          title="Last page"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Kit Inventory Modal */}
+      {showInventoryModal && (
+        <div
+          className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50"
+          onClick={() => setShowInventoryModal(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl p-6 max-w-4xl w-full mx-4 max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-4 border-b pb-4 mb-4 flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={loadInventoryProducts}
+                  disabled={loadingInventory}
+                  className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#c8102e] disabled:hover:scale-100 transition-all"
+                  title="Refresh"
+                >
+                  {loadingInventory ? (
+                    <svg className="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  )}
+                </button>
+                <input
+                  type="search"
+                  placeholder="Search inventory..."
+                  value={inventorySearchQuery}
+                  onChange={(e) => setInventorySearchQuery(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-[#c8102e] focus:border-transparent bg-white min-w-[180px]"
+                  title="Search by name or SKU"
+                />
+              </div>
+              <h2 className="text-xl font-bold text-gray-900 flex-1 text-center">Inventory</h2>
+              <div className="flex items-center gap-2 min-w-[80px] justify-end">
+                <button
+                  onClick={() => setShowInventoryModal(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+                  aria-label="Close"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              {loadingInventory ? (
+                <div className="text-center py-8 text-gray-600">Loading...</div>
+              ) : (
+                <div className="overflow-x-auto overflow-y-auto flex-1 min-h-0">
+                  {(() => {
+                    const q = inventorySearchQuery.trim().toLowerCase()
+                    const filtered = !q ? inventoryProducts : inventoryProducts.filter(row =>
+                      (row.name || '').toLowerCase().includes(q) || (row.sku || '').toLowerCase().includes(q)
+                    )
+                    const toggleSort = (col: 'name' | 'sku' | 'inventory' | 'reorder_point') => {
+                      setInventorySort(prev => prev.col === col ? { col, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' })
+                    }
+                    const sorted = [...filtered].sort((a, b) => {
+                      const { col, dir } = inventorySort
+                      const mult = dir === 'asc' ? 1 : -1
+                      if (col === 'name') return mult * (a.name || '').localeCompare(b.name || '')
+                      if (col === 'sku') return mult * (a.sku || '').localeCompare(b.sku || '')
+                      if (col === 'inventory') return mult * (a.inventory - b.inventory)
+                      return mult * ((a.reorder_point ?? 0) - (b.reorder_point ?? 0))
+                    })
+                    const SortIndicator = ({ c }: { c: 'name' | 'sku' | 'inventory' | 'reorder_point' }) =>
+                      inventorySort.col === c ? <span className="ml-1">{inventorySort.dir === 'asc' ? '↑' : '↓'}</span> : null
+                    return (
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50 sticky top-0 z-10 shadow-sm">
+                      <tr>
+                        <th
+                          className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                          onClick={() => toggleSort('name')}
+                        >
+                          Name <SortIndicator c="name" />
+                        </th>
+                        <th
+                          className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                          onClick={() => toggleSort('sku')}
+                        >
+                          SKU <SortIndicator c="sku" />
+                        </th>
+                        <th
+                          className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                          onClick={() => toggleSort('inventory')}
+                        >
+                          Inventory <SortIndicator c="inventory" />
+                        </th>
+                        <th
+                          className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 select-none"
+                          onClick={() => toggleSort('reorder_point')}
+                        >
+                          Reorder Point <SortIndicator c="reorder_point" />
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {filtered.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-6 py-8 text-center text-sm text-gray-600">
+                            {inventoryProducts.length === 0 ? 'No products found.' : 'No matches for search.'}
+                          </td>
+                        </tr>
+                      ) : (
+                        sorted.map((row) => {
+                          const rowKey = row.componentName ? `component-${row.componentName}` : `${row.productId}-${row.size}`
+                          const isEditingInventory =
+                            editingInventoryCell?.field === 'inventory' &&
+                            (row.componentName ? editingInventoryCell?.componentName === row.componentName : editingInventoryCell?.productId === row.productId && editingInventoryCell?.size === row.size)
+                          const isEditingReorder =
+                            editingInventoryCell?.field === 'reorder_point' &&
+                            (row.componentName ? editingInventoryCell?.componentName === row.componentName : editingInventoryCell?.productId === row.productId && editingInventoryCell?.size === row.size)
+                          const savingKey = row.componentName ? `component-${row.componentName}-inventory` : `${row.productId}-${row.size}-inventory`
+                          const savingReorderKey = row.componentName ? `component-${row.componentName}-reorder_point` : `${row.productId}-${row.size}-reorder_point`
+                          return (
+                            <tr key={rowKey}>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-center">
+                                {row.name}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono text-center">
+                                {row.sku ?? '–'}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-center">
+                                {isEditingInventory ? (
+                                  <div className="flex items-center justify-center gap-1">
+                                    <input
+                                      type="number"
+                                      value={inventoryEditDraft}
+                                      onChange={(e) => setInventoryEditDraft(e.target.value)}
+                                      onBlur={() => saveInventoryCell(row, 'inventory', inventoryEditDraft)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') saveInventoryCell(row, 'inventory', inventoryEditDraft)
+                                        if (e.key === 'Escape') {
+                                          setEditingInventoryCell(null)
+                                          setInventoryEditDraft('')
+                                        }
+                                      }}
+                                      className="w-20 px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-[#c8102e] focus:border-transparent"
+                                      autoFocus
+                                    />
+                                    {savingInventoryCell === savingKey && (
+                                      <span className="text-xs text-gray-500">Saving…</span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingInventoryCell({ productId: row.productId, componentName: row.componentName, field: 'inventory', size: row.size })
+                                      setInventoryEditDraft(String(row.inventory))
+                                    }}
+                                    className="text-gray-900 hover:bg-gray-100 px-2 py-1 rounded"
+                                  >
+                                    {row.inventory}
+                                  </button>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-center">
+                                {isEditingReorder ? (
+                                  <div className="flex items-center justify-center gap-1">
+                                    <input
+                                      type="number"
+                                      value={inventoryEditDraft}
+                                      onChange={(e) => setInventoryEditDraft(e.target.value)}
+                                      onBlur={() => saveInventoryCell(row, 'reorder_point', inventoryEditDraft)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') saveInventoryCell(row, 'reorder_point', inventoryEditDraft)
+                                        if (e.key === 'Escape') {
+                                          setEditingInventoryCell(null)
+                                          setInventoryEditDraft('')
+                                        }
+                                      }}
+                                      placeholder="–"
+                                      className="w-20 px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-[#c8102e] focus:border-transparent"
+                                      autoFocus
+                                    />
+                                    {savingInventoryCell === savingReorderKey && (
+                                      <span className="text-xs text-gray-500">Saving…</span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingInventoryCell({ productId: row.productId, componentName: row.componentName, field: 'reorder_point', size: row.size })
+                                      setInventoryEditDraft(row.reorder_point != null ? String(row.reorder_point) : '')
+                                    }}
+                                    className="text-gray-900 hover:bg-gray-100 px-2 py-1 rounded"
+                                  >
+                                    {row.reorder_point != null ? row.reorder_point : '–'}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                    )
+                  })()}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Code Save Message Modal */}
       {codeMessage && (
         <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50">
@@ -1213,7 +1842,7 @@ export default function AdminPage() {
           <div className="bg-white rounded-lg shadow-xl p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
               <div>
-                <h2 className="text-xl font-bold text-gray-900">Products Ordered</h2>
+                <h2 className="text-xl font-bold text-gray-900">Order Details</h2>
                 <p className="text-sm text-gray-600 mt-1">Program: {showProductsPopup.program}</p>
               </div>
               <button
@@ -1225,6 +1854,25 @@ export default function AdminPage() {
                 </svg>
               </button>
             </div>
+            {/* Contact and class info (code, name, email, class date, class type) */}
+            <div className="mb-4 p-4 bg-gray-50 rounded-lg space-y-1">
+              {showProductsPopup.code != null && showProductsPopup.code !== '' && (
+                <p className="text-sm text-gray-900"><span className="font-medium">Code:</span> <span className="font-mono">{showProductsPopup.code}</span></p>
+              )}
+              {showProductsPopup.first_name != null && showProductsPopup.last_name != null && (
+                <p className="text-sm text-gray-900"><span className="font-medium">Name:</span> {showProductsPopup.first_name} {showProductsPopup.last_name}</p>
+              )}
+              {showProductsPopup.email != null && showProductsPopup.email !== '' && (
+                <p className="text-sm text-gray-900"><span className="font-medium">Email:</span> {showProductsPopup.email}</p>
+              )}
+              {showProductsPopup.class_date != null && showProductsPopup.class_date !== '' && (
+                <p className="text-sm text-gray-900"><span className="font-medium">Class Date:</span> {new Date(showProductsPopup.class_date).toLocaleDateString()}</p>
+              )}
+              {showProductsPopup.class_type != null && showProductsPopup.class_type !== '' && (
+                <p className="text-sm text-gray-900"><span className="font-medium">Class Type:</span> {showProductsPopup.class_type}</p>
+              )}
+            </div>
+            <h3 className="text-sm font-semibold text-gray-900 mb-2">Products Ordered</h3>
             <div className="space-y-2">
               {showProductsPopup.items.map((item, idx) => (
                 <div key={idx} className="p-3 bg-gray-50 rounded-md">
@@ -1376,14 +2024,13 @@ export default function AdminPage() {
                   <button
                     onClick={async () => {
                       try {
-                        // Cancel each selected order
+                        // Cancel each selected order; restore inventory then delete
                         for (const orderId of Array.from(selectedOrders)) {
                           const order = orders.find(o => o.id === orderId)
                           if (!order) continue
-                          
-                          // Restore inventory for each item
-                          for (const item of order.items) {
-                            await restoreInventory(item.product_id, item.size || null, 1)
+                          const toRestore = getRestoreListFromOrderItems(order.items)
+                          for (const { productId, size } of toRestore) {
+                            await restoreInventory(productId, size, 1)
                           }
                           
                           // Mark code as unused

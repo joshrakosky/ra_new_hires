@@ -94,7 +94,7 @@ async function updateInventory(productId: string, size: string | null, quantity:
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { code, email, firstName, lastName, program, tshirtSize, kitId, shipping } = body
+    const { code, email, firstName, lastName, program, tshirtSize, kitId, shipping, classDate, classType } = body
 
     // Validate required fields
     if (!code || !email || !firstName || !lastName || !program || !tshirtSize || !kitId || !shipping) {
@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
     // Generate order number
     const orderNumber = await generateOrderNumber()
 
-    // Create order
+    // Create order (class_date and class_type from date picker and class type dropdown)
     const { data: order, error: orderError } = await supabase
       .from('ra_new_hire_orders')
       .insert({
@@ -157,7 +157,9 @@ export async function POST(request: NextRequest) {
         shipping_city: shipping.city,
         shipping_state: shipping.state,
         shipping_zip: shipping.zip,
-        shipping_country: shipping.country || 'USA'
+        shipping_country: shipping.country || 'USA',
+        class_date: classDate || null,
+        class_type: classType || null
       })
       .select()
       .single()

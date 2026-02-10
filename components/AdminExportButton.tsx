@@ -102,6 +102,8 @@ export default function AdminExportButton() {
               'First Name': order.first_name || '',
               'Last Name': order.last_name || '',
               'Email': order.email,
+              'Class Date': order.class_date ? new Date(order.class_date).toLocaleDateString() : '',
+              'Class Type': order.class_type || '',
               'Program': order.program || '',
               'Product Name': kitItem.name, // Kit component name
               'Customer Item #': '', // Kit components don't have customer item numbers
@@ -122,6 +124,8 @@ export default function AdminExportButton() {
               'First Name': order.first_name || '',
               'Last Name': order.last_name || '',
               'Email': order.email,
+              'Class Date': order.class_date ? new Date(order.class_date).toLocaleDateString() : '',
+              'Class Type': order.class_type || '',
               'Program': order.program || '',
               'Product Name': item.product_name,
               'Customer Item #': item.customer_item_number || '',

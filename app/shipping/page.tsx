@@ -10,10 +10,14 @@ type Program = 'RA' | 'LIFT'
 export default function ShippingPage() {
   const router = useRouter()
   const [program, setProgram] = useState<Program | null>(null)
+  const CLASS_TYPE_OPTIONS = ['Corporate', 'Pilot', 'Maintenance', 'Flight Attendant'] as const
+
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
-    email: ''
+    email: '',
+    classDate: '',
+    classType: ''
   })
   const [error, setError] = useState('')
 
@@ -66,7 +70,9 @@ export default function ShippingPage() {
         setFormData({
           firstName: parsedShipping.firstName || '',
           lastName: parsedShipping.lastName || '',
-          email: parsedShipping.email || ''
+          email: parsedShipping.email || '',
+          classDate: parsedShipping.classDate || '',
+          classType: parsedShipping.classType || ''
         })
       } catch (e) {
         // If parsing fails, start fresh
@@ -94,7 +100,17 @@ export default function ShippingPage() {
       return
     }
 
-    // Store shipping information to sessionStorage
+    if (!formData.classDate) {
+      setError('Please select your class date')
+      return
+    }
+
+    if (!formData.classType || !CLASS_TYPE_OPTIONS.includes(formData.classType as typeof CLASS_TYPE_OPTIONS[number])) {
+      setError('Please select your class type')
+      return
+    }
+
+    // Store shipping information to sessionStorage (includes class date and class type)
     const shippingInfo = {
       ...formData,
       ...defaultShipping
@@ -106,7 +122,7 @@ export default function ShippingPage() {
     router.push('/review')
   }
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({
       ...formData,
       [e.target.name]: e.target.value
@@ -181,6 +197,42 @@ export default function ShippingPage() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#c8102e] focus:border-transparent text-black bg-white"
                   placeholder="your.email@example.com"
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="classDate" className="block text-sm font-medium text-gray-700 mb-1">
+                    Class Date <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    id="classDate"
+                    name="classDate"
+                    value={formData.classDate}
+                    onChange={handleChange}
+                    required
+                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#c8102e] focus:border-transparent text-black bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="classType" className="block text-sm font-medium text-gray-700 mb-1">
+                    Class Type <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    id="classType"
+                    name="classType"
+                    value={formData.classType}
+                    onChange={handleChange}
+                    required
+                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#c8102e] focus:border-transparent text-black bg-white"
+                  >
+                    <option value="">Select class type</option>
+                    {CLASS_TYPE_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
 

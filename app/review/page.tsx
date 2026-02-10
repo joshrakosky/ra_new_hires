@@ -116,7 +116,9 @@ export default function ReviewPage() {
           program: program,
           tshirtSize: tshirtSize,
           kitId: kitId,
-          shipping: shipping
+          shipping: shipping,
+          classDate: shipping.classDate || null,
+          classType: shipping.classType || null
         }),
       })
 
@@ -193,12 +195,18 @@ export default function ReviewPage() {
             </div>
           </div>
 
-          {/* Shipping Information Section */}
+          {/* Your Information Section */}
           <div className="mb-6 pb-6 border-b">
             <h2 className="text-xl font-semibold text-gray-900 mb-4">Your Information</h2>
-            <div className="bg-gray-50 rounded-lg p-4">
+            <div className="bg-gray-50 rounded-lg p-4 space-y-1">
               <p className="font-medium text-gray-900">{shipping.firstName} {shipping.lastName}</p>
-              <p className="text-sm text-gray-600">{shipping.email}</p>
+              <p className="text-sm text-gray-600">Email: {shipping.email}</p>
+              {shipping.classDate && (
+                <p className="text-sm text-gray-600">Class Date: {new Date(shipping.classDate).toLocaleDateString()}</p>
+              )}
+              {shipping.classType && (
+                <p className="text-sm text-gray-600">Class Type: {shipping.classType}</p>
+              )}
             </div>
           </div>
 

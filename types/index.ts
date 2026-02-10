@@ -19,6 +19,8 @@ export interface Product {
   deco?: string // Decoration information
   inventory: number // Overall product inventory count
   inventory_by_size?: Record<string, number> // Track inventory by size: {"XS": 10, "S": 20, ...}
+  /** Reorder threshold; when inventory falls at or below this value (used in admin Kit Inventory). */
+  reorder_point?: number
   created_at: string
 }
 
@@ -41,6 +43,10 @@ export interface Order {
   shipping_zip: string
   shipping_country: string
   created_at: string
+  /** User-selected class/training date (date picker) */
+  class_date?: string
+  /** Corporate | Pilot | Maintenance | Flight Attendant */
+  class_type?: string
 }
 
 export interface OrderItem {
