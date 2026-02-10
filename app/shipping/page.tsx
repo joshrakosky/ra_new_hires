@@ -10,7 +10,7 @@ type Program = 'RA' | 'LIFT'
 export default function ShippingPage() {
   const router = useRouter()
   const [program, setProgram] = useState<Program | null>(null)
-  const CLASS_TYPE_OPTIONS = ['Corporate', 'Pilot', 'Maintenance', 'Flight Attendant'] as const
+  const CLASS_TYPE_OPTIONS = ['Corporate', 'Flight Attendant', 'General', 'LIFT', 'Maintenance', 'Pilot'] as const
 
   const [formData, setFormData] = useState({
     firstName: '',

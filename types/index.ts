@@ -45,7 +45,7 @@ export interface Order {
   created_at: string
   /** User-selected class/training date (date picker) */
   class_date?: string
-  /** Corporate | Pilot | Maintenance | Flight Attendant */
+  /** Corporate | Flight Attendant | General | LIFT | Maintenance | Pilot */
   class_type?: string
 }
 
