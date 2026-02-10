@@ -686,31 +686,56 @@ export default function AdminPage() {
     try {
       const { data: productsData, error: productsError } = await supabase
         .from('ra_new_hire_products')
-        .select('id, deco')
+        .select('id, deco, inventory, inventory_by_size, reorder_point')
       if (productsError) throw productsError
 
-      const productDecoMap = new Map<string, string>()
-      productsData?.forEach((p: { id: string; deco?: string }) => {
-        if (p.deco) productDecoMap.set(p.id, p.deco)
+      type ProductInfo = { deco: string; inventory: number; inventory_by_size?: Record<string, number>; reorder_point: number | null }
+      const productInfoMap = new Map<string, ProductInfo>()
+      productsData?.forEach((p: { id: string; deco?: string; inventory?: number; inventory_by_size?: Record<string, number>; reorder_point?: number | null }) => {
+        productInfoMap.set(p.id, {
+          deco: p.deco || '',
+          inventory: p.inventory ?? 0,
+          inventory_by_size: p.inventory_by_size,
+          reorder_point: p.reorder_point ?? null
+        })
       })
 
-      const summaryMap = new Map<string, { quantity: number; deco: string }>()
+      const summaryMap = new Map<string, { quantity: number; deco: string; product_id: string | null; size: string }>()
       orders.forEach(order => {
         order.items.forEach(item => {
           const key = [item.product_name, item.customer_item_number || '', item.color || 'N/A', item.size || 'N/A'].join('|')
-          const deco = item.product_id ? (productDecoMap.get(item.product_id) || '') : ''
+          const productInfo = item.product_id ? productInfoMap.get(item.product_id) : null
+          const deco = productInfo?.deco || ''
+          const size = item.size || 'N/A'
           const existing = summaryMap.get(key)
           if (existing) {
-            summaryMap.set(key, { quantity: existing.quantity + 1, deco: existing.deco })
+            summaryMap.set(key, { quantity: existing.quantity + 1, deco: existing.deco, product_id: existing.product_id, size: existing.size })
           } else {
-            summaryMap.set(key, { quantity: 1, deco })
+            summaryMap.set(key, { quantity: 1, deco, product_id: item.product_id || null, size })
           }
         })
       })
 
       const summaryData = Array.from(summaryMap.entries()).map(([key, data]) => {
         const [productName, customerItem, color, size] = key.split('|')
-        return { 'Product Name': productName, 'Customer Item #': customerItem, 'Color': color, 'Size': size, 'Deco': data.deco || '', 'Quantity': data.quantity }
+        const productInfo = data.product_id ? productInfoMap.get(data.product_id) : null
+        // For t-shirts: use size-specific inventory; for kits/components: use overall inventory
+        const currentInventory = productInfo
+          ? (data.size !== 'N/A' && productInfo.inventory_by_size?.[data.size] !== undefined
+            ? productInfo.inventory_by_size[data.size]
+            : productInfo.inventory)
+          : ''
+        const reorderPoint = productInfo?.reorder_point ?? ''
+        return {
+          'Product Name': productName,
+          'Customer Item #': customerItem,
+          'Color': color,
+          'Size': size,
+          'Deco': data.deco || '',
+          'Quantity': data.quantity,
+          'Current Inventory': currentInventory,
+          'Reorder Point': reorderPoint
+        }
       }).sort((a, b) => {
         if (a['Product Name'] !== b['Product Name']) return a['Product Name'].localeCompare(b['Product Name'])
         if (a['Color'] !== b['Color']) return a['Color'].localeCompare(b['Color'])
