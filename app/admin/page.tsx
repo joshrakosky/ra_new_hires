@@ -68,6 +68,8 @@ export default function AdminPage() {
   const [savingInventoryCell, setSavingInventoryCell] = useState<string | null>(null)
   const [inventorySearchQuery, setInventorySearchQuery] = useState('')
   const [inventorySort, setInventorySort] = useState<{ col: 'name' | 'sku' | 'inventory' | 'reorder_point'; dir: 'asc' | 'desc' }>({ col: 'name', dir: 'asc' })
+  const [showExportModal, setShowExportModal] = useState(false)
+  const [exportLoading, setExportLoading] = useState<'xml' | 'detailed' | 'distribution' | null>(null)
 
   useEffect(() => {
     // Check if user is admin (ADMIN code)
@@ -247,9 +249,9 @@ export default function AdminPage() {
     }
   }
 
-  // Lock body scroll when Code Generator, Code Manager, or Inventory modal is open
+  // Lock body scroll when Code Generator, Code Manager, Inventory modal, or Export modal is open
   useEffect(() => {
-    if (showCodeGenerator || showCodeManager || showInventoryModal) {
+    if (showCodeGenerator || showCodeManager || showInventoryModal || showExportModal) {
       document.body.style.overflow = 'hidden'
     } else {
       document.body.style.overflow = 'unset'
@@ -257,7 +259,7 @@ export default function AdminPage() {
     return () => {
       document.body.style.overflow = 'unset'
     }
-  }, [showCodeGenerator, showCodeManager, showInventoryModal])
+  }, [showCodeGenerator, showCodeManager, showInventoryModal, showExportModal])
 
   const loadOrders = async () => {
     try {
@@ -635,118 +637,118 @@ export default function AdminPage() {
     }
   }, [showCodeManager])
 
-  const exportToExcel = async () => {
-    // Fetch all products to get deco information
-    const { data: productsData, error: productsError } = await supabase
-      .from('ra_new_hire_products')
-      .select('id, deco')
-
-    if (productsError) {
-      alert('Failed to load product information. Please try again.')
-      return
+  /** Export detailed orders (one row per item) to Excel. */
+  const exportDetailedOrders = async () => {
+    setShowExportModal(false)
+    setExportLoading('detailed')
+    try {
+      const detailedData = orders.flatMap(order =>
+        order.items.map((item) => ({
+          'Order Number': order.order_number,
+          'Code': order.code,
+          'First Name': order.first_name,
+          'Last Name': order.last_name,
+          'Email': order.email,
+          'Class Date': order.class_date ? new Date(order.class_date).toLocaleDateString() : '',
+          'Class Type': order.class_type || '',
+          'Program': order.program,
+          'Status': order.status || 'Pending',
+          'Product Name': item.product_name,
+          'Customer Item #': item.customer_item_number || '',
+          'Color': item.color || '',
+          'Size': item.size || '',
+          'Shipping Name': order.shipping_name,
+          'Shipping Attention': order.shipping_attention || '',
+          'Shipping Address': order.shipping_address,
+          'Shipping Address 2': order.shipping_address2 || '',
+          'Shipping City': order.shipping_city,
+          'Shipping State': order.shipping_state,
+          'Shipping ZIP': order.shipping_zip,
+          'Shipping Country': order.shipping_country,
+          'Order Date': new Date(order.created_at).toLocaleDateString()
+        }))
+      )
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detailedData), 'Detailed Orders')
+      XLSX.writeFile(wb, `ra-new-hires-detailed-orders-${new Date().toISOString().split('T')[0]}.xlsx`)
+    } catch (err: any) {
+      console.error('Export error:', err)
+      alert('Failed to export. Please try again.')
+    } finally {
+      setExportLoading(null)
     }
+  }
 
-    // Create a map of product_id -> deco for quick lookup
-    const productDecoMap = new Map<string, string>()
-    productsData?.forEach(product => {
-      if (product.deco) {
-        productDecoMap.set(product.id, product.deco)
-      }
-    })
+  /** Export product usage (distribution summary) to Excel. */
+  const exportDistributionSummary = async () => {
+    setShowExportModal(false)
+    setExportLoading('distribution')
+    try {
+      const { data: productsData, error: productsError } = await supabase
+        .from('ra_new_hire_products')
+        .select('id, deco')
+      if (productsError) throw productsError
 
-    // Sheet 1: Detailed Orders (one row per item)
-    const detailedData = orders.flatMap(order => {
-      return order.items.map((item) => ({
-        'Order Number': order.order_number,
-        'Code': order.code,
-        'First Name': order.first_name,
-        'Last Name': order.last_name,
-        'Email': order.email,
-        'Class Date': order.class_date ? new Date(order.class_date).toLocaleDateString() : '',
-        'Class Type': order.class_type || '',
-        'Program': order.program,
-        'Status': order.status || 'Pending',
-        'Product Name': item.product_name,
-        'Customer Item #': item.customer_item_number || '',
-        'Color': item.color || '',
-        'Size': item.size || '', // Only shows size for t-shirts, empty for kits
-        'Shipping Name': order.shipping_name,
-        'Shipping Attention': order.shipping_attention || '',
-        'Shipping Address': order.shipping_address,
-        'Shipping Address 2': order.shipping_address2 || '',
-        'Shipping City': order.shipping_city,
-        'Shipping State': order.shipping_state,
-        'Shipping ZIP': order.shipping_zip,
-        'Shipping Country': order.shipping_country,
-        'Order Date': new Date(order.created_at).toLocaleDateString()
-      }))
-    })
-
-    // Sheet 2: Distribution Summary (grouped by product/color/size)
-    const summaryMap = new Map<string, { quantity: number; deco: string }>()
-    
-    orders.forEach(order => {
-      order.items.forEach(item => {
-        // Create a unique key for product/color/size combination
-        const key = [
-          item.product_name,
-          item.customer_item_number || '',
-          item.color || 'N/A',
-          item.size || 'N/A'
-        ].join('|')
-        
-        // Get deco from product
-        let deco = item.product_id ? (productDecoMap.get(item.product_id) || '') : ''
-        
-        // Add any product-specific deco logic here if needed
-        
-        const existing = summaryMap.get(key)
-        if (existing) {
-          summaryMap.set(key, { quantity: existing.quantity + 1, deco: existing.deco })
-        } else {
-          summaryMap.set(key, { quantity: 1, deco })
-        }
+      const productDecoMap = new Map<string, string>()
+      productsData?.forEach((p: { id: string; deco?: string }) => {
+        if (p.deco) productDecoMap.set(p.id, p.deco)
       })
-    })
 
-    // Convert map to array for Excel
-    const summaryData = Array.from(summaryMap.entries()).map(([key, data]) => {
-      const [productName, customerItem, color, size] = key.split('|')
-      return {
-        'Product Name': productName,
-        'Customer Item #': customerItem,
-        'Color': color,
-        'Size': size,
-        'Deco': data.deco || '',
-        'Quantity': data.quantity
-      }
-    }).sort((a, b) => {
-      // Sort by product name, then color, then size
-      if (a['Product Name'] !== b['Product Name']) {
-        return a['Product Name'].localeCompare(b['Product Name'])
-      }
-      if (a['Color'] !== b['Color']) {
-        return a['Color'].localeCompare(b['Color'])
-      }
-      return a['Size'].localeCompare(b['Size'])
-    })
+      const summaryMap = new Map<string, { quantity: number; deco: string }>()
+      orders.forEach(order => {
+        order.items.forEach(item => {
+          const key = [item.product_name, item.customer_item_number || '', item.color || 'N/A', item.size || 'N/A'].join('|')
+          const deco = item.product_id ? (productDecoMap.get(item.product_id) || '') : ''
+          const existing = summaryMap.get(key)
+          if (existing) {
+            summaryMap.set(key, { quantity: existing.quantity + 1, deco: existing.deco })
+          } else {
+            summaryMap.set(key, { quantity: 1, deco })
+          }
+        })
+      })
 
-    // Create workbook with two sheets
-    const wb = XLSX.utils.book_new()
-    
-    // Detailed Orders sheet
-    const wsDetailed = XLSX.utils.json_to_sheet(detailedData)
-    XLSX.utils.book_append_sheet(wb, wsDetailed, 'Detailed Orders')
-    
-    // Distribution Summary sheet
-    const wsSummary = XLSX.utils.json_to_sheet(summaryData)
-    XLSX.utils.book_append_sheet(wb, wsSummary, 'Distribution Summary')
+      const summaryData = Array.from(summaryMap.entries()).map(([key, data]) => {
+        const [productName, customerItem, color, size] = key.split('|')
+        return { 'Product Name': productName, 'Customer Item #': customerItem, 'Color': color, 'Size': size, 'Deco': data.deco || '', 'Quantity': data.quantity }
+      }).sort((a, b) => {
+        if (a['Product Name'] !== b['Product Name']) return a['Product Name'].localeCompare(b['Product Name'])
+        if (a['Color'] !== b['Color']) return a['Color'].localeCompare(b['Color'])
+        return a['Size'].localeCompare(b['Size'])
+      })
 
-    // Generate filename with current date
-    const filename = `ra-new-hires-orders-${new Date().toISOString().split('T')[0]}.xlsx`
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryData), 'Product Usage')
+      XLSX.writeFile(wb, `ra-new-hires-product-usage-${new Date().toISOString().split('T')[0]}.xlsx`)
+    } catch (err: any) {
+      console.error('Export error:', err)
+      alert('Failed to export. Please try again.')
+    } finally {
+      setExportLoading(null)
+    }
+  }
 
-    // Write file
-    XLSX.writeFile(wb, filename)
+  /** Export orders as XML for Foremost Graphics fulfillment. */
+  const exportToXml = async () => {
+    setShowExportModal(false)
+    setExportLoading('xml')
+    try {
+      const res = await fetch('/api/fulfillment/orders')
+      if (!res.ok) throw new Error(res.statusText)
+      const xml = await res.text()
+      const blob = new Blob([xml], { type: 'application/xml' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `ra-new-hires-fulfillment-${new Date().toISOString().split('T')[0]}.xml`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      console.error('XML export error:', err)
+      alert('Failed to export XML. Please try again.')
+    } finally {
+      setExportLoading(null)
+    }
   }
 
   // Filter orders by status, then by search (order number, code, name, email, class type)
@@ -983,14 +985,21 @@ export default function AdminPage() {
                     </button>
                   )}
                   <button
-                    onClick={exportToExcel}
-                    disabled={orders.length === 0}
+                    onClick={() => setShowExportModal(true)}
+                    disabled={orders.length === 0 || exportLoading !== null}
                     className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#c8102e] disabled:hover:scale-100 transition-all"
-                    title="Exports two sheets: Detailed Orders and Distribution Summary"
+                    title="Export orders"
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
+                    {exportLoading ? (
+                      <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                    ) : (
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                    )}
                   </button>
                 </div>
               </div>
@@ -1832,6 +1841,50 @@ export default function AdminPage() {
                 OK
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export Modal */}
+      {showExportModal && (
+        <div
+          className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50"
+          onClick={() => setShowExportModal(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl p-6 max-w-sm w-full mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Export</h2>
+            <div className="space-y-2">
+              <button
+                onClick={exportToXml}
+                disabled={orders.length === 0}
+                className="w-full px-4 py-3 text-left rounded-md bg-gray-100 hover:bg-gray-200 text-gray-900 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                XML (Foremost fulfillment)
+              </button>
+              <button
+                onClick={exportDistributionSummary}
+                disabled={orders.length === 0}
+                className="w-full px-4 py-3 text-left rounded-md bg-gray-100 hover:bg-gray-200 text-gray-900 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Product Usage (distribution summary)
+              </button>
+              <button
+                onClick={exportDetailedOrders}
+                disabled={orders.length === 0}
+                className="w-full px-4 py-3 text-left rounded-md bg-gray-100 hover:bg-gray-200 text-gray-900 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Detailed Orders
+              </button>
+            </div>
+            <button
+              onClick={() => setShowExportModal(false)}
+              className="mt-4 w-full px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}
