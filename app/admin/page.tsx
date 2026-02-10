@@ -180,7 +180,7 @@ export default function AdminPage() {
     const trimmed = value.trim()
     const isNull = trimmed === '' || trimmed === '–'
     const num = isNull ? null : parseInt(trimmed, 10)
-    if (!isNull && (Number.isNaN(num) || num < -999999)) {
+    if (!isNull && num !== null && (Number.isNaN(num) || num < -999999)) {
       setEditingInventoryCell(null)
       setInventoryEditDraft('')
       return
