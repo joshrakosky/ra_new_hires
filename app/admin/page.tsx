@@ -69,7 +69,8 @@ export default function AdminPage() {
   const [inventorySearchQuery, setInventorySearchQuery] = useState('')
   const [inventorySort, setInventorySort] = useState<{ col: 'name' | 'sku' | 'inventory' | 'reorder_point'; dir: 'asc' | 'desc' }>({ col: 'name', dir: 'asc' })
   const [showExportModal, setShowExportModal] = useState(false)
-  const [exportLoading, setExportLoading] = useState<'xml' | 'detailed' | 'distribution' | null>(null)
+  const [showKitPendingConfirm, setShowKitPendingConfirm] = useState(false)
+  const [exportLoading, setExportLoading] = useState<'xml' | 'detailed' | 'distribution' | 'kit' | 'kitPending' | null>(null)
 
   useEffect(() => {
     // Check if user is admin (ADMIN code)
@@ -249,9 +250,9 @@ export default function AdminPage() {
     }
   }
 
-  // Lock body scroll when Code Generator, Code Manager, Inventory modal, or Export modal is open
+  // Lock body scroll when Code Generator, Code Manager, Inventory modal, Export modal, or Kit Pending confirm is open
   useEffect(() => {
-    if (showCodeGenerator || showCodeManager || showInventoryModal || showExportModal) {
+    if (showCodeGenerator || showCodeManager || showInventoryModal || showExportModal || showKitPendingConfirm) {
       document.body.style.overflow = 'hidden'
     } else {
       document.body.style.overflow = 'unset'
@@ -259,7 +260,7 @@ export default function AdminPage() {
     return () => {
       document.body.style.overflow = 'unset'
     }
-  }, [showCodeGenerator, showCodeManager, showInventoryModal, showExportModal])
+  }, [showCodeGenerator, showCodeManager, showInventoryModal, showExportModal, showKitPendingConfirm])
 
   const loadOrders = async () => {
     try {
@@ -773,6 +774,100 @@ export default function AdminPage() {
       alert('Failed to export XML. Please try again.')
     } finally {
       setExportLoading(null)
+    }
+  }
+
+  /** Shared kit export logic. Builds Kit Orders + Kit Counts sheets from the given orders. */
+  const exportKitOrdersWithFilter = async (ordersToExport: OrderWithItems[], filenameSuffix: string) => {
+    setShowExportModal(false)
+    try {
+      const { data: productsData, error: productsError } = await supabase
+        .from('ra_new_hire_products')
+        .select('id, category, customer_item_number')
+      if (productsError) throw productsError
+
+      const productMap = new Map(
+        (productsData ?? []).map((p: { id: string; category: string; customer_item_number?: string }) => [p.id, p])
+      )
+
+      const kitData = ordersToExport.map((order) => {
+        let kitType = ''
+        for (const item of order.items) {
+          const product = item.product_id ? productMap.get(item.product_id) : null
+          if (product?.category === 'kit') {
+            kitType = product.customer_item_number ?? ''
+            break
+          }
+        }
+        return {
+          'Order Number': order.order_number,
+          'Name': [order.first_name || '', order.last_name || ''].filter(Boolean).join(' ') || '',
+          'Kit Type': kitType || 'N/A',
+          'T-Shirt Size': order.tshirt_size ?? 'N/A'
+        }
+      })
+
+      const kitCountMap = new Map<string, number>()
+      for (const row of kitData) {
+        const k = row['Kit Type'] as string
+        kitCountMap.set(k, (kitCountMap.get(k) ?? 0) + 1)
+      }
+      const kitCountData = Array.from(kitCountMap.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([kitType, count]) => ({ 'Kit Type': kitType, 'Count': count }))
+
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(kitData), 'Kit Orders')
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(kitCountData), 'Kit Counts')
+      const date = new Date().toISOString().split('T')[0]
+      XLSX.writeFile(wb, `ra-new-hires-kit-orders${filenameSuffix ? `-${filenameSuffix}` : ''}-${date}.xlsx`)
+    } catch (err: any) {
+      console.error('Export error:', err)
+      alert('Failed to export. Please try again.')
+    } finally {
+      setExportLoading(null)
+    }
+  }
+
+  /** Export all orders at kit level for production fulfillment. */
+  const exportKitOrders = async () => {
+    setExportLoading('kit')
+    await exportKitOrdersWithFilter(orders, '')
+  }
+
+  /** Open Kit Orders (pending) confirmation before export. */
+  const handleKitOrdersPendingClick = () => {
+    setShowExportModal(false)
+    setShowKitPendingConfirm(true)
+  }
+
+  /** Run Kit Orders (pending) export, optionally updating status to Fulfillment after download. */
+  const runKitOrdersPendingExport = async (updateStatusAfterDownload: boolean) => {
+    const pendingOrders = orders.filter((o) => (o.status || 'Pending') === 'Pending')
+    if (pendingOrders.length === 0) {
+      alert('No pending orders to export.')
+      setShowKitPendingConfirm(false)
+      return
+    }
+    try {
+      setExportLoading('kitPending')
+      await exportKitOrdersWithFilter(pendingOrders, 'pending')
+      if (updateStatusAfterDownload) {
+        const orderIds = pendingOrders.map((o) => o.id)
+        const { error } = await supabase
+          .from('ra_new_hire_orders')
+          .update({ status: 'Fulfillment' })
+          .in('id', orderIds)
+        if (error) throw error
+        await loadOrders()
+        alert(`Exported ${pendingOrders.length} order(s) and updated their status to Fulfillment.`)
+      }
+    } catch (err: any) {
+      console.error('Kit pending export error:', err)
+      alert(`Failed: ${err.message || 'Unknown error'}`)
+    } finally {
+      setExportLoading(null)
+      setShowKitPendingConfirm(false)
     }
   }
 
@@ -1870,6 +1965,47 @@ export default function AdminPage() {
         </div>
       )}
 
+      {/* Kit Orders Pending - Confirm before download */}
+      {showKitPendingConfirm && (
+        <div
+          className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50"
+          onClick={() => exportLoading === null && setShowKitPendingConfirm(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl p-6 max-w-sm w-full mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-bold text-gray-900 mb-4">Kit Orders (pending)</h2>
+            <p className="text-gray-600 mb-6">
+              Do you want to update the status of these {orders.filter((o) => (o.status || 'Pending') === 'Pending').length} order(s) to Fulfillment after download?
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => runKitOrdersPendingExport(false)}
+                disabled={exportLoading !== null}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                No, just download
+              </button>
+              <button
+                onClick={() => runKitOrdersPendingExport(true)}
+                disabled={exportLoading !== null}
+                className="flex-1 px-4 py-2 text-white rounded-md hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: '#c8102e' }}
+              >
+                Yes, update after download
+              </button>
+            </div>
+            <button
+              onClick={() => setShowKitPendingConfirm(false)}
+              className="mt-4 w-full px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-md transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Export Modal */}
       {showExportModal && (
         <div
@@ -1902,6 +2038,20 @@ export default function AdminPage() {
                 className="w-full px-4 py-3 text-left rounded-md bg-gray-100 hover:bg-gray-200 text-gray-900 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Detailed Orders
+              </button>
+              <button
+                onClick={exportKitOrders}
+                disabled={orders.length === 0}
+                className="w-full px-4 py-3 text-left rounded-md bg-gray-100 hover:bg-gray-200 text-gray-900 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Kit Orders (fulfillment)
+              </button>
+              <button
+                onClick={handleKitOrdersPendingClick}
+                disabled={orders.filter((o) => (o.status || 'Pending') === 'Pending').length === 0}
+                className="w-full px-4 py-3 text-left rounded-md bg-gray-100 hover:bg-gray-200 text-gray-900 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Kit Orders (pending)
               </button>
             </div>
             <button
