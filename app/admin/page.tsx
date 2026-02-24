@@ -103,7 +103,7 @@ export default function AdminPage() {
       setLoadingInventory(true)
       const { data: productsData, error: productsError } = await supabase
         .from('ra_new_hire_products')
-        .select('id, name, customer_item_number, inventory, inventory_by_size, reorder_point, category, kit_items')
+        .select('id, name, customer_item_number, inventory, inventory_by_size, reorder_point, category, kit_items, program')
         .in('category', ['tshirt', 'kit'])
         .order('name')
       if (productsError) throw productsError
