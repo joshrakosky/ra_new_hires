@@ -693,7 +693,7 @@ export default function AdminPage() {
       const data = await file.arrayBuffer()
       const wb = XLSX.read(data, { type: 'array' })
       const firstSheet = wb.Sheets[wb.SheetNames[0]]
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { header: 1 }) as unknown[][]
+      const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as unknown[][]
       if (rows.length < 2) {
         setAssignmentMessage({ type: 'error', message: 'File must have a header row and at least one data row.' })
         setUploadingAssignments(false)
