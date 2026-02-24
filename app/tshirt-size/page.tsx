@@ -15,7 +15,6 @@ interface TShirtProduct {
   name: string
   thumbnail_url?: string
   available_sizes?: string[]
-  inventory_by_size?: Record<string, number>
 }
 
 export default function TShirtSizePage() {
@@ -43,7 +42,7 @@ export default function TShirtSizePage() {
       // Fetch RA t-shirt product (used for both RA and LIFT programs)
       const { data, error } = await supabase
         .from('ra_new_hire_products')
-        .select('id, name, thumbnail_url, available_sizes, inventory_by_size')
+        .select('id, name, thumbnail_url, available_sizes')
         .eq('category', 'tshirt')
         .eq('program', 'RA')
         .single()
@@ -76,30 +75,6 @@ export default function TShirtSizePage() {
     } finally {
       setLoading(false)
     }
-  }
-
-  const getInventoryForSize = (size: string): number | null => {
-    if (!tshirtProduct?.inventory_by_size) return null
-    return tshirtProduct.inventory_by_size[size] ?? null
-  }
-
-  const isSizeAvailable = (size: string): boolean => {
-    // All sizes are available (backorders allowed)
-    const inventory = getInventoryForSize(size)
-    return inventory !== null
-  }
-
-  const hasAnyAvailableSize = (): boolean => {
-    // Always return true since backorders are allowed
-    return true
-  }
-
-  const getInventoryDisplay = (size: string): string => {
-    const inventory = getInventoryForSize(size)
-    if (inventory === null) return ''
-    if (inventory < 0) return ` (${Math.abs(inventory)} backordered)`
-    if (inventory === 0) return ' (backorder)'
-    return ` (${inventory} available)`
   }
 
   const handleContinue = () => {
@@ -179,17 +154,11 @@ export default function TShirtSizePage() {
                 className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#c8102e] focus:border-transparent text-black bg-white"
               >
                 <option value="">Select a size</option>
-                {sizes.map((size) => {
-                  const inventoryDisplay = getInventoryDisplay(size)
-                  return (
-                    <option
-                      key={size}
-                      value={size}
-                    >
-                      {size}{inventoryDisplay}
-                    </option>
-                  )
-                })}
+                {sizes.map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
               </select>
             </div>
           </div>

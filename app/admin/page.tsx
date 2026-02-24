@@ -451,36 +451,72 @@ export default function AdminPage() {
     }
   }
 
-  // Generate random 6-letter codes
-  const generateCodes = (quantity: number): string[] => {
+  // Generate random 6-letter codes, excluding existing codes in DB and within the batch
+  const generateCodes = (quantity: number, existingCodeSet: Set<string>): string[] => {
     const codes: string[] = []
     const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-    
-    while (codes.length < quantity) {
+    const maxAttempts = quantity * 1000 // Prevent infinite loop if code space is nearly full
+    let attempts = 0
+
+    while (codes.length < quantity && attempts < maxAttempts) {
       let code = ''
       for (let i = 0; i < 6; i++) {
         code += letters.charAt(Math.floor(Math.random() * letters.length))
       }
-      
-      // Ensure code is unique and not ADMIN
-      if (code !== 'ADMIN' && !codes.includes(code)) {
+
+      // Ensure code is unique: not ADMIN, not in DB, not already in this batch
+      if (code !== 'ADMIN' && !existingCodeSet.has(code) && !codes.includes(code)) {
         codes.push(code)
+        existingCodeSet.add(code) // Track so we don't regenerate in same batch
       }
+      attempts++
     }
-    
+
     return codes
   }
 
-  const handleGenerateCodes = () => {
+  const handleGenerateCodes = async () => {
     if (codeQuantity < 1 || codeQuantity > 1000) {
       alert('Please enter a quantity between 1 and 1000')
       return
     }
-    
+
     setGeneratingCodes(true)
-    const codes = generateCodes(codeQuantity)
-    setGeneratedCodes(codes)
-    setGeneratingCodes(false)
+    try {
+      // Fetch all existing codes from DB to avoid duplicates
+      const { data: existingCodes } = await supabase
+        .from('ra_new_hire_access_codes')
+        .select('code')
+      const existingCodeSet = new Set(existingCodes?.map((c: { code: string }) => c.code) || [])
+
+      // Also exclude codes already used in orders (one order per code)
+      const { data: orderCodes } = await supabase
+        .from('ra_new_hire_orders')
+        .select('code')
+      for (const o of orderCodes ?? []) {
+        if (o?.code) existingCodeSet.add(o.code)
+      }
+
+      const codes = generateCodes(codeQuantity, existingCodeSet)
+      setGeneratedCodes(codes)
+
+      if (codes.length < codeQuantity) {
+        setCodeMessage({
+          type: 'error',
+          message: `Only generated ${codes.length} of ${codeQuantity} unique codes. The code space may be nearly full.`
+        })
+      } else {
+        setCodeMessage(null)
+      }
+    } catch (err: any) {
+      console.error('Failed to generate codes:', err)
+      setCodeMessage({
+        type: 'error',
+        message: `Failed to generate codes: ${err.message || 'Unknown error'}`
+      })
+    } finally {
+      setGeneratingCodes(false)
+    }
   }
 
   const handleSaveCodes = async () => {

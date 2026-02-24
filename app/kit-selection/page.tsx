@@ -19,7 +19,6 @@ interface KitProduct {
   name: string
   description?: string
   thumbnail_url?: string
-  inventory: number
   kit_items?: KitItem[] // JSONB array of products included in the kit
 }
 
@@ -58,7 +57,7 @@ export default function KitSelectionPage() {
       // Order by customer_item_number to ensure Kit 1, 2, 3, 4 order
       const { data, error } = await supabase
         .from('ra_new_hire_products')
-        .select('id, name, description, thumbnail_url, inventory, customer_item_number, kit_items')
+        .select('id, name, description, thumbnail_url, customer_item_number, kit_items')
         .eq('category', 'kit')
         .eq('program', programType)
         .order('customer_item_number')
@@ -126,8 +125,6 @@ export default function KitSelectionPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
               {kits.map((kit) => {
                 const isSelected = selectedKitId === kit.id
-                // Show backorder status if inventory is negative
-                const isBackordered = kit.inventory < 0
 
                 return (
                   <div
@@ -165,23 +162,6 @@ export default function KitSelectionPage() {
                         Click product names below to view thumbnails
                       </p>
                     )}
-
-                    {/* Inventory Status */}
-                    <div className="mb-4">
-                      {isBackordered ? (
-                        <span className="text-orange-600 font-semibold">
-                          {Math.abs(kit.inventory)} backordered
-                        </span>
-                      ) : kit.inventory === 0 ? (
-                        <span className="text-gray-600 text-sm">
-                          Available (backorder)
-                        </span>
-                      ) : (
-                        <span className="text-gray-600 text-sm">
-                          {kit.inventory} available
-                        </span>
-                      )}
-                    </div>
 
                     {/* Includes the following section */}
                     {kit.kit_items && kit.kit_items.length > 0 && (
