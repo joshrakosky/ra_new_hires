@@ -205,13 +205,23 @@ export async function POST(request: NextRequest) {
 
     // Add kit component order items (expand kit into individual components)
     if (kitProduct && kitProduct.kit_items && Array.isArray(kitProduct.kit_items) && kitProduct.kit_items.length > 0) {
+      // Fetch component SKUs from ra_new_hire_component_inventory when available (for exports/fulfillment alignment)
+      const componentNames = kitProduct.kit_items.map((k: { name: string }) => k.name)
+      const { data: componentSkus } = await supabase
+        .from('ra_new_hire_component_inventory')
+        .select('component_name, sku')
+        .in('component_name', componentNames)
+      const skuMap = new Map<string, string | null>()
+      for (const row of componentSkus ?? []) {
+        if (row.sku) skuMap.set(row.component_name, row.sku)
+      }
       // Insert individual components from kit_items
       kitProduct.kit_items.forEach((kitItem: { name: string; thumbnail_url?: string }) => {
         orderItems.push({
           order_id: order.id,
           product_id: kitProduct.id, // Keep reference to kit product
           product_name: kitItem.name, // Component name
-          customer_item_number: null, // Components don't have SKUs
+          customer_item_number: skuMap.get(kitItem.name) ?? null, // Use component SKU when available
           color: null,
           size: null
         })

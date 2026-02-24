@@ -68,6 +68,9 @@ export default function AdminPage() {
   const [savingInventoryCell, setSavingInventoryCell] = useState<string | null>(null)
   const [inventorySearchQuery, setInventorySearchQuery] = useState('')
   const [inventorySort, setInventorySort] = useState<{ col: 'name' | 'sku' | 'inventory' | 'reorder_point'; dir: 'asc' | 'desc' }>({ col: 'name', dir: 'asc' })
+  const [inventoryViewMode, setInventoryViewMode] = useState<'component' | 'kit'>('component')
+  type KitProduct = { id: string; name: string; program: string; customer_item_number: string | null; kit_items: Array<{ name: string }> | null }
+  const [inventoryKitProducts, setInventoryKitProducts] = useState<KitProduct[]>([])
   const [showExportModal, setShowExportModal] = useState(false)
   const [showKitPendingConfirm, setShowKitPendingConfirm] = useState(false)
   const [exportLoading, setExportLoading] = useState<'xml' | 'detailed' | 'distribution' | 'kit' | 'kitPending' | null>(null)
@@ -116,11 +119,15 @@ export default function AdminPage() {
 
       const { data: componentData, error: componentError } = await supabase
         .from('ra_new_hire_component_inventory')
-        .select('component_name, inventory, reorder_point')
+        .select('component_name, inventory, reorder_point, sku')
       if (componentError) throw componentError
-      const componentMap = new Map<string, { inventory: number; reorder_point: number | null }>()
+      const componentMap = new Map<string, { inventory: number; reorder_point: number | null; sku: string | null }>()
       for (const row of componentData ?? []) {
-        componentMap.set(row.component_name, { inventory: row.inventory ?? 0, reorder_point: row.reorder_point ?? null })
+        componentMap.set(row.component_name, {
+          inventory: row.inventory ?? 0,
+          reorder_point: row.reorder_point ?? null,
+          sku: row.sku ?? null
+        })
       }
 
       const rows: InventoryRow[] = []
@@ -143,22 +150,34 @@ export default function AdminPage() {
         }
       }
       for (const name of Array.from(componentNames).sort()) {
-        const data = componentMap.get(name) ?? { inventory: 0, reorder_point: null }
+        const data = componentMap.get(name) ?? { inventory: 0, reorder_point: null, sku: null }
         rows.push({
           productId: null,
           componentName: name,
           name,
           size: null,
-          sku: null,
+          sku: data.sku ?? null,
           inventory: data.inventory,
           reorder_point: data.reorder_point,
           category: 'component'
         })
       }
       setInventoryProducts(rows)
+      // Store kit products for kit view (completable calculation)
+      const kitProducts = (productsData ?? [])
+        .filter((p: { category: string }) => p.category === 'kit')
+        .map((p: { id: string; name: string; program: string; customer_item_number: string | null; kit_items: unknown }) => ({
+          id: p.id,
+          name: p.name,
+          program: p.program,
+          customer_item_number: p.customer_item_number ?? null,
+          kit_items: Array.isArray(p.kit_items) ? (p.kit_items as Array<{ name: string }>) : null
+        }))
+      setInventoryKitProducts(kitProducts)
     } catch (err: any) {
       console.error('Failed to load inventory:', err)
       setInventoryProducts([])
+      setInventoryKitProducts([])
     } finally {
       setLoadingInventory(false)
     }
@@ -1746,7 +1765,34 @@ export default function AdminPage() {
                   title="Search by name or SKU"
                 />
               </div>
-              <h2 className="text-xl font-bold text-gray-900 flex-1 text-center">Inventory</h2>
+              <div className="flex items-center justify-center gap-3 flex-1">
+                <h2 className="text-xl font-bold text-gray-900">Inventory</h2>
+                {/* Toggle: Component view (individual products) vs Kit view (completable kits) */}
+                <div className="flex items-center rounded-lg border border-gray-300 overflow-hidden bg-gray-50" role="group" aria-label="Inventory view mode">
+                  <button
+                    type="button"
+                    onClick={() => setInventoryViewMode('component')}
+                    className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                      inventoryViewMode === 'component'
+                        ? 'bg-[#c8102e] text-white'
+                        : 'text-gray-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    Components
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInventoryViewMode('kit')}
+                    className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                      inventoryViewMode === 'kit'
+                        ? 'bg-[#c8102e] text-white'
+                        : 'text-gray-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    Kits
+                  </button>
+                </div>
+              </div>
               <div className="flex items-center gap-2 min-w-[80px] justify-end">
                 <button
                   onClick={() => setShowInventoryModal(false)}
@@ -1762,6 +1808,64 @@ export default function AdminPage() {
             <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
               {loadingInventory ? (
                 <div className="text-center py-8 text-gray-600">Loading...</div>
+              ) : inventoryViewMode === 'kit' ? (
+                /* Kit view: one row per kit with "Kits completable" = min(component inventories) */
+                (() => {
+                  const componentInvMap = new Map<string, number>()
+                  for (const row of inventoryProducts) {
+                    if (row.componentName) componentInvMap.set(row.componentName, row.inventory)
+                  }
+                  const kitRows = inventoryKitProducts.map(kit => {
+                    const items = kit.kit_items ?? []
+                    const inventories = items.map(it => componentInvMap.get(it.name) ?? 0)
+                    const completable = items.length > 0 ? Math.min(...inventories) : 0
+                    return { kit, completable, items, inventories }
+                  })
+                  const q = inventorySearchQuery.trim().toLowerCase()
+                  const filtered = !q ? kitRows : kitRows.filter(r =>
+                    (r.kit.name || '').toLowerCase().includes(q) || (r.kit.program || '').toLowerCase().includes(q)
+                  )
+                  return (
+                    <div className="overflow-x-auto overflow-y-auto flex-1 min-h-0">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50 sticky top-0 z-10 shadow-sm">
+                          <tr>
+                            <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Kit Name</th>
+                            <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Kits Completable</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Components</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {filtered.length === 0 ? (
+                            <tr>
+                              <td colSpan={3} className="px-6 py-8 text-center text-sm text-gray-600">
+                                {inventoryKitProducts.length === 0 ? 'No kits found.' : 'No matches for search.'}
+                              </td>
+                            </tr>
+                          ) : (
+                            filtered.map(({ kit, completable, items, inventories }) => (
+                              <tr key={kit.id}>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-center">{kit.name}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-center font-medium tabular-nums w-32 text-gray-900" data-completable={completable}>
+                                  {String(completable ?? 0)}
+                                </td>
+                                <td className="px-6 py-4 text-sm text-gray-600">
+                                  <span title={items.map((it, i) => `${it.name}: ${inventories[i]}`).join(', ')}>
+                                    {items.map((it, i) => (
+                                      <span key={it.name}>
+                                        {it.name}({inventories[i]}){i < items.length - 1 ? ', ' : ''}
+                                      </span>
+                                    ))}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
+                })()
               ) : (
                 <div className="overflow-x-auto overflow-y-auto flex-1 min-h-0">
                   {(() => {
