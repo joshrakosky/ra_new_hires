@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import * as XLSX from 'xlsx'
@@ -15,7 +15,7 @@ export default function AdminPage() {
   const [cancelingOrderId, setCancelingOrderId] = useState<string | null>(null)
   const [confirmCancel, setConfirmCancel] = useState<{ orderId: string; orderNumber: string } | null>(null)
   const [cancelMessage, setCancelMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
-  const [showCodeGenerator, setShowCodeGenerator] = useState(false)
+  const [showGeneratePanel, setShowGeneratePanel] = useState(false)
   const [codeQuantity, setCodeQuantity] = useState<number>(10)
   const [generatedCodes, setGeneratedCodes] = useState<string[]>([])
   const [savingCodes, setSavingCodes] = useState(false)
@@ -74,6 +74,16 @@ export default function AdminPage() {
   const [showExportModal, setShowExportModal] = useState(false)
   const [showKitPendingConfirm, setShowKitPendingConfirm] = useState(false)
   const [exportLoading, setExportLoading] = useState<'xml' | 'detailed' | 'distribution' | 'kit' | 'kitPending' | null>(null)
+  // Code Assignments: who was assigned which code (upload CSV/Excel, searchable backup)
+  const [showCodeAssignmentsModal, setShowCodeAssignmentsModal] = useState(false)
+  type CodeAssignment = { id: string; email: string; name: string | null; code: string; created_at: string }
+  const [codeAssignments, setCodeAssignments] = useState<CodeAssignment[]>([])
+  const [loadingAssignments, setLoadingAssignments] = useState(false)
+  const [assignmentSearchQuery, setAssignmentSearchQuery] = useState('')
+  const [assignmentPage, setAssignmentPage] = useState(1)
+  const assignmentPageSize = 10
+  const [uploadingAssignments, setUploadingAssignments] = useState(false)
+  const [assignmentMessage, setAssignmentMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
 
   useEffect(() => {
     // Check if user is admin (ADMIN code)
@@ -97,6 +107,29 @@ export default function AdminPage() {
       loadAccessCodes()
     }
   }, [showCodeManager])
+
+  useEffect(() => {
+    if (showCodeAssignmentsModal) {
+      loadCodeAssignments()
+    }
+  }, [showCodeAssignmentsModal])
+
+  // Reset to page 1 when search changes so results stay relevant
+  useEffect(() => {
+    setAssignmentPage(1)
+  }, [assignmentSearchQuery])
+
+  // Search filters across all assignments; pagination slices the filtered result
+  const filteredAssignments = useMemo(() => {
+    const q = assignmentSearchQuery.trim().toLowerCase()
+    if (!q) return codeAssignments
+    return codeAssignments.filter(
+      r =>
+        (r.name || '').toLowerCase().includes(q) ||
+        (r.email || '').toLowerCase().includes(q) ||
+        (r.code || '').toLowerCase().includes(q)
+    )
+  }, [codeAssignments, assignmentSearchQuery])
 
   const loadInventoryProducts = async () => {
     try {
@@ -269,9 +302,9 @@ export default function AdminPage() {
     }
   }
 
-  // Lock body scroll when Code Generator, Code Manager, Inventory modal, Export modal, or Kit Pending confirm is open
+  // Lock body scroll when Code Manager, Inventory modal, Export modal, Code Assignments, or Kit Pending confirm is open
   useEffect(() => {
-    if (showCodeGenerator || showCodeManager || showInventoryModal || showExportModal || showKitPendingConfirm) {
+    if (showCodeManager || showInventoryModal || showExportModal || showCodeAssignmentsModal || showKitPendingConfirm) {
       document.body.style.overflow = 'hidden'
     } else {
       document.body.style.overflow = 'unset'
@@ -279,7 +312,7 @@ export default function AdminPage() {
     return () => {
       document.body.style.overflow = 'unset'
     }
-  }, [showCodeGenerator, showCodeManager, showInventoryModal, showExportModal, showKitPendingConfirm])
+  }, [showCodeManager, showInventoryModal, showExportModal, showCodeAssignmentsModal, showKitPendingConfirm])
 
   const loadOrders = async () => {
     try {
@@ -570,9 +603,10 @@ export default function AdminPage() {
         type: 'success',
         message: `Successfully saved ${newCodes.length} code(s) to database.${existingCodeSet.size > 0 ? ` ${existingCodeSet.size} code(s) were already in the database.` : ''}`
       })
-      
-      // Remove saved codes from generated list
-      setGeneratedCodes(generatedCodes.filter(code => existingCodeSet.has(code)))
+      // Refresh Code Manager list so new codes appear
+      await loadAccessCodes()
+      // Clear generated list after successful save
+      setGeneratedCodes([])
     } catch (err: any) {
       console.error('Failed to save codes:', err)
       const errorMessage = err.message || err.toString() || JSON.stringify(err) || 'Unknown error occurred'
@@ -624,6 +658,99 @@ export default function AdminPage() {
     } finally {
       setLoadingCodes(false)
     }
+  }
+
+  const loadCodeAssignments = async () => {
+    try {
+      setLoadingAssignments(true)
+      const { data, error } = await supabase
+        .from('ra_new_hire_code_assignments')
+        .select('id, email, name, code, created_at')
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      setCodeAssignments((data as CodeAssignment[]) || [])
+      setAssignmentMessage(null)
+    } catch (err: any) {
+      console.error('Failed to load code assignments:', err)
+      setAssignmentMessage({ type: 'error', message: `Failed to load: ${err.message || 'Unknown error'}` })
+      setCodeAssignments([])
+    } finally {
+      setLoadingAssignments(false)
+    }
+  }
+
+  const handleUploadAssignments = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    if (!['csv', 'xlsx', 'xls'].includes(ext || '')) {
+      setAssignmentMessage({ type: 'error', message: 'Please upload a CSV or Excel file (.csv, .xlsx, .xls)' })
+      return
+    }
+    setUploadingAssignments(true)
+    setAssignmentMessage(null)
+    try {
+      const data = await file.arrayBuffer()
+      const wb = XLSX.read(data, { type: 'array' })
+      const firstSheet = wb.Sheets[wb.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { header: 1 }) as unknown[][]
+      if (rows.length < 2) {
+        setAssignmentMessage({ type: 'error', message: 'File must have a header row and at least one data row.' })
+        setUploadingAssignments(false)
+        return
+      }
+      const headers = (rows[0] as string[]).map(h => String(h || '').trim().toLowerCase())
+      const emailIdx = headers.findIndex(h => h === 'email' || h === 'e-mail')
+      const codeIdx = headers.findIndex(h => h === 'code')
+      const nameIdx = headers.findIndex(h => h === 'name')
+      if (emailIdx < 0 || codeIdx < 0) {
+        setAssignmentMessage({ type: 'error', message: 'File must have "email" and "code" columns.' })
+        setUploadingAssignments(false)
+        return
+      }
+      const toInsert: { email: string; name: string | null; code: string }[] = []
+      let skipped = 0
+      for (let i = 1; i < rows.length; i++) {
+        const row = rows[i] as unknown[]
+        const email = String(row[emailIdx] ?? '').trim()
+        const code = String(row[codeIdx] ?? '').trim()
+        const name = nameIdx >= 0 ? String(row[nameIdx] ?? '').trim() || null : null
+        if (!email || !code) {
+          skipped++
+          continue
+        }
+        toInsert.push({ email, name, code })
+      }
+      if (toInsert.length === 0) {
+        setAssignmentMessage({ type: 'error', message: `No valid rows to import. ${skipped} row(s) skipped (missing email or code).` })
+        setUploadingAssignments(false)
+        return
+      }
+      const { error } = await supabase.from('ra_new_hire_code_assignments').insert(toInsert)
+      if (error) throw error
+      await loadCodeAssignments()
+      setAssignmentMessage({
+        type: 'success',
+        message: `Imported ${toInsert.length} assignment(s).${skipped > 0 ? ` ${skipped} row(s) skipped (missing email or code).` : ''}`
+      })
+    } catch (err: any) {
+      console.error('Failed to upload assignments:', err)
+      setAssignmentMessage({ type: 'error', message: `Failed to import: ${err.message || 'Unknown error'}` })
+    } finally {
+      setUploadingAssignments(false)
+      e.target.value = ''
+    }
+  }
+
+  const handleDownloadAssignmentsTemplate = () => {
+    const templateData = [
+      { email: 'john.doe@example.com', code: 'ABCDEF', name: 'John Doe' },
+      { email: 'jane.smith@example.com', code: 'GHIJKL', name: 'Jane Smith' }
+    ]
+    const ws = XLSX.utils.json_to_sheet(templateData)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Code Assignments')
+    XLSX.writeFile(wb, 'code-assignments-template.xlsx')
   }
 
   const handleToggleCodeStatus = async (codeId: string, currentStatus: boolean) => {
@@ -1098,28 +1225,25 @@ export default function AdminPage() {
                 </div>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => {
-                      setShowCodeGenerator(!showCodeGenerator)
-                      if (!showCodeGenerator) setShowCodeManager(false)
-                    }}
-                    className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 transition-all"
-                    title={showCodeGenerator ? 'Hide Code Generator' : 'Generate Codes'}
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowCodeManager(!showCodeManager)
-                      if (!showCodeManager) setShowCodeGenerator(false)
-                    }}
+                    onClick={() => setShowCodeManager(!showCodeManager)}
                     className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 transition-all"
                     title={showCodeManager ? 'Hide Code Manager' : 'Manage Codes'}
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowCodeAssignmentsModal(!showCodeAssignmentsModal)
+                      if (!showCodeAssignmentsModal) setShowCodeManager(false)
+                    }}
+                    className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 transition-all"
+                    title={showCodeAssignmentsModal ? 'Hide Code Assignments' : 'Code Assignments'}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                     </svg>
                   </button>
                   <button
@@ -1134,10 +1258,7 @@ export default function AdminPage() {
                   <button
                     onClick={() => {
                       setShowInventoryModal(!showInventoryModal)
-                      if (!showInventoryModal) {
-                        setShowCodeGenerator(false)
-                        setShowCodeManager(false)
-                      }
+                      if (!showInventoryModal) setShowCodeManager(false)
                     }}
                     className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 transition-all"
                     title="Inventory"
@@ -1437,122 +1558,17 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* Code Generator Modal */}
-      {showCodeGenerator && (
-        <div
-          className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50"
-          onClick={() => setShowCodeGenerator(false)}
-        >
-          <div
-            className="bg-white rounded-lg shadow-xl p-6 max-w-2xl w-full mx-4 max-h-[85vh] flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex justify-between items-center border-b pb-4 mb-4">
-              <h2 className="text-xl font-bold text-gray-900">Access Code Generator</h2>
-              <button
-                onClick={() => setShowCodeGenerator(false)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-                aria-label="Close"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <div className="overflow-y-auto flex-1 min-h-0">
-              <div className="flex gap-4 items-end mb-4">
-                <div className="flex-1">
-                  <label htmlFor="codeQuantity" className="block text-sm font-medium text-gray-700 mb-2">
-                    Number of Codes to Generate
-                  </label>
-                  <input
-                    type="number"
-                    id="codeQuantity"
-                    min="1"
-                    max="1000"
-                    value={codeQuantity}
-                    onChange={(e) => setCodeQuantity(parseInt(e.target.value) || 10)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#c8102e] focus:border-transparent"
-                  />
-                </div>
-                <button
-                  onClick={handleGenerateCodes}
-                  disabled={generatingCodes}
-                  className="px-6 py-2 text-white rounded-md hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: '#c8102e' }}
-                >
-                  {generatingCodes ? 'Generating...' : 'Generate Codes'}
-                </button>
-              </div>
-
-              {generatedCodes.length > 0 && (
-                <div className="mt-4">
-                  <div className="flex justify-between items-center mb-2">
-                    <p className="text-sm font-medium text-gray-700">
-                      Generated {generatedCodes.length} code(s)
-                    </p>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleSaveCodes}
-                        disabled={savingCodes || generatedCodes.length === 0}
-                        className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                      >
-                        {savingCodes ? 'Saving...' : 'Save to Database'}
-                      </button>
-                      <button
-                        onClick={handleExportCodes}
-                        disabled={generatedCodes.length === 0}
-                        className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                      >
-                        Export to Excel
-                      </button>
-                    </div>
-                  </div>
-                  <div className="overflow-x-auto overflow-y-auto max-h-[40vh] border border-gray-300 rounded-md">
-                    <table className="min-w-full divide-y divide-gray-200">
-                      <thead className="bg-gray-50 sticky top-0 z-10 shadow-sm">
-                        <tr>
-                          <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            #
-                          </th>
-                          <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Code
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
-                        {generatedCodes.map((code, index) => (
-                          <tr key={index}>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
-                              {index + 1}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900 text-center">
-                              {code}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Code Manager Modal */}
       {showCodeManager && (
         <div
           className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50"
-          onClick={() => setShowCodeManager(false)}
+          onClick={() => { setShowCodeManager(false); setShowGeneratePanel(false) }}
         >
           <div
             className="bg-white rounded-lg shadow-xl p-6 max-w-5xl w-full mx-4 max-h-[85vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex justify-between items-center border-b pb-4 mb-4 flex-shrink-0">
-              <h2 className="text-xl font-bold text-gray-900">Access Code Manager</h2>
+            <div className="relative flex justify-between items-center border-b pb-4 mb-4 flex-shrink-0">
               <div className="flex items-center gap-2">
                 <select
                   value={codeFilter}
@@ -1566,15 +1582,37 @@ export default function AdminPage() {
                   <option value="used">Used Only</option>
                   <option value="unused">Unused Only</option>
                 </select>
+              </div>
+              <h2 className="text-xl font-bold text-gray-900 absolute left-1/2 -translate-x-1/2">Access Code Manager</h2>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowGeneratePanel(!showGeneratePanel)}
+                  className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 transition-all"
+                  title={showGeneratePanel ? 'Hide Generate Codes' : 'Generate Codes'}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                </button>
                 <button
                   onClick={loadAccessCodes}
                   disabled={loadingCodes}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 text-sm disabled:opacity-50"
+                  className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#c8102e] disabled:hover:scale-100 transition-all"
+                  title="Refresh"
                 >
-                  {loadingCodes ? 'Loading...' : 'Refresh'}
+                  {loadingCodes ? (
+                    <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  )}
                 </button>
                 <button
-                  onClick={() => setShowCodeManager(false)}
+                  onClick={() => { setShowCodeManager(false); setShowGeneratePanel(false) }}
                   className="text-gray-400 hover:text-gray-600 transition-colors p-1"
                   aria-label="Close"
                 >
@@ -1584,6 +1622,81 @@ export default function AdminPage() {
                 </button>
               </div>
             </div>
+            {codeMessage && (
+              <div className={`mb-4 px-4 py-2 rounded-md text-sm ${codeMessage.type === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+                {codeMessage.message}
+              </div>
+            )}
+            {showGeneratePanel && (
+              <div className="mb-4 p-4 border border-gray-200 rounded-lg bg-gray-50 flex-shrink-0">
+                <div className="flex gap-4 items-end mb-4">
+                  <div className="flex-1">
+                    <label htmlFor="codeQuantity" className="block text-sm font-medium text-gray-700 mb-2">
+                      Number of Codes to Generate
+                    </label>
+                    <input
+                      type="number"
+                      id="codeQuantity"
+                      min="1"
+                      max="1000"
+                      value={codeQuantity}
+                      onChange={(e) => setCodeQuantity(parseInt(e.target.value) || 10)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-[#c8102e] focus:border-transparent"
+                    />
+                  </div>
+                  <button
+                    onClick={handleGenerateCodes}
+                    disabled={generatingCodes}
+                    className="px-6 py-2 bg-[#c8102e] text-white rounded-md hover:bg-[#e63946] disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {generatingCodes ? 'Generating...' : 'Generate Codes'}
+                  </button>
+                </div>
+                {generatedCodes.length > 0 && (
+                  <div className="mt-4">
+                    <div className="flex justify-between items-center mb-2">
+                      <p className="text-sm font-medium text-gray-700">
+                        Generated {generatedCodes.length} code(s)
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleSaveCodes}
+                          disabled={savingCodes || generatedCodes.length === 0}
+                          className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                        >
+                          {savingCodes ? 'Saving...' : 'Save to Database'}
+                        </button>
+                        <button
+                          onClick={handleExportCodes}
+                          disabled={generatedCodes.length === 0}
+                          className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                        >
+                          Export to Excel
+                        </button>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto overflow-y-auto max-h-[40vh] border border-gray-300 rounded-md bg-white">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50 sticky top-0 z-10 shadow-sm">
+                          <tr>
+                            <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
+                            <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Code</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {generatedCodes.map((code, index) => (
+                            <tr key={index}>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">{index + 1}</td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900 text-center">{code}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="flex-1 min-h-0 flex flex-col">
               {loadingCodes ? (
                 <div className="text-center py-8 text-gray-600">Loading codes...</div>
@@ -1757,6 +1870,200 @@ export default function AdminPage() {
                       </div>
                     </div>
                   )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Code Assignments Modal */}
+      {showCodeAssignmentsModal && (
+        <div
+          className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50"
+          onClick={() => setShowCodeAssignmentsModal(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl p-6 max-w-5xl w-full mx-4 max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center border-b pb-4 mb-4 flex-shrink-0">
+              <h2 className="text-xl font-bold text-gray-900">Code Assignments</h2>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleDownloadAssignmentsTemplate}
+                  className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 transition-all"
+                  title="Download template with email, code, name columns"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                </button>
+                <label className={`p-2 rounded-md cursor-pointer transition-all flex-shrink-0 ${uploadingAssignments ? 'bg-[#c8102e] text-white opacity-50 cursor-not-allowed' : 'bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110'}`} title="Upload CSV/Excel">
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    onChange={handleUploadAssignments}
+                    disabled={uploadingAssignments}
+                    className="hidden"
+                  />
+                  {uploadingAssignments ? (
+                    <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                    </svg>
+                  )}
+                </label>
+                <button
+                  onClick={loadCodeAssignments}
+                  disabled={loadingAssignments}
+                  className="p-2 rounded-md bg-[#c8102e] text-white hover:bg-[#e63946] hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#c8102e] disabled:hover:scale-100 transition-all"
+                  title="Refresh assignments"
+                >
+                  {loadingAssignments ? (
+                    <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowCodeAssignmentsModal(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors p-1"
+                  aria-label="Close"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            {assignmentMessage && (
+              <div className={`mb-4 px-4 py-2 rounded-md text-sm ${assignmentMessage.type === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
+                {assignmentMessage.message}
+              </div>
+            )}
+            <div className="mb-4 flex-shrink-0">
+              <input
+                type="search"
+                placeholder="Search by name, email, or code..."
+                value={assignmentSearchQuery}
+                onChange={(e) => setAssignmentSearchQuery(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-[#c8102e] focus:border-transparent"
+              />
+            </div>
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              {loadingAssignments ? (
+                <div className="text-center py-8 text-gray-600">Loading assignments...</div>
+              ) : (
+                <>
+                  <div className="overflow-x-auto overflow-y-auto flex-1 min-h-0">
+                    {(() => {
+                      const totalFiltered = filteredAssignments.length
+                      const assignmentTotalPages = Math.max(1, Math.ceil(totalFiltered / assignmentPageSize))
+                      const assignmentStartIndex = (assignmentPage - 1) * assignmentPageSize
+                      const assignmentEndIndex = assignmentStartIndex + assignmentPageSize
+                      const paginatedAssignments = filteredAssignments.slice(assignmentStartIndex, assignmentEndIndex)
+                      return (
+                        <table className="min-w-full divide-y divide-gray-200">
+                          <thead className="bg-gray-50 sticky top-0 z-10 shadow-sm">
+                            <tr>
+                              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Code</th>
+                              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Uploaded</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {filteredAssignments.length === 0 ? (
+                              <tr>
+                                <td colSpan={4} className="px-6 py-8 text-center text-sm text-gray-600">
+                                  {codeAssignments.length === 0 ? 'No assignments yet. Upload a CSV or Excel file to get started.' : 'No matches for search.'}
+                                </td>
+                              </tr>
+                            ) : (
+                              paginatedAssignments.map((row) => (
+                                <tr key={row.id}>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-center">{row.name || '–'}</td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">{row.email}</td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900 text-center">{row.code}</td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">{new Date(row.created_at).toLocaleDateString()}</td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      )
+                    })()}
+                  </div>
+                  {(() => {
+                    const totalFiltered = filteredAssignments.length
+                    const assignmentTotalPages = Math.max(1, Math.ceil(totalFiltered / assignmentPageSize))
+                    const assignmentStartIndex = (assignmentPage - 1) * assignmentPageSize
+                    const assignmentEndIndex = assignmentStartIndex + assignmentPageSize
+                    if (totalFiltered === 0) return null
+                    return (
+                      <div className="flex items-center justify-between border-t border-gray-200 px-4 py-3 flex-shrink-0">
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => setAssignmentPage(1)}
+                            disabled={assignmentPage === 1}
+                            className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                            title="First page"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={() => setAssignmentPage(prev => Math.max(1, prev - 1))}
+                            disabled={assignmentPage === 1}
+                            className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                            title="Previous page"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                            </svg>
+                          </button>
+                          <span className="px-3 py-1 text-sm text-gray-700">
+                            Page {assignmentPage} of {assignmentTotalPages}
+                          </span>
+                          <button
+                            onClick={() => setAssignmentPage(prev => Math.min(assignmentTotalPages, prev + 1))}
+                            disabled={assignmentPage === assignmentTotalPages}
+                            className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                            title="Next page"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={() => setAssignmentPage(assignmentTotalPages)}
+                            disabled={assignmentPage === assignmentTotalPages}
+                            className="px-3 py-1 text-sm border border-gray-300 rounded-md bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white transition-colors"
+                            title="Last page"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                            </svg>
+                          </button>
+                        </div>
+                        <span className="text-sm text-gray-700">
+                          Showing {assignmentStartIndex + 1} to {Math.min(assignmentEndIndex, totalFiltered)} of {totalFiltered} assignments
+                        </span>
+                      </div>
+                    )
+                  })()}
                 </>
               )}
             </div>
